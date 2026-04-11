@@ -822,15 +822,19 @@ function extraerArticulos(texto = "") {
   const lines = limpio.split("\n");
   const articulos = [];
   let actual = null;
+  let prevLine = "";
 
-  const encabezadoArticulo = /^(?:@@BOLD_START@@\s*)?(?:ART[ÍI]CULO|ARTICULO|ART\.?)\s+(\d{1,4}(?:[°º]?|bis|ter|quater|quinquies)?)(?:\s*[-–—.:]\s*(.*))?$/i;
+  const encabezadoArticulo = /^(?:ART[ÍI]CULO|ARTICULO|ART\.?)\s+(\d{1,4}(?:[°º]?|bis|ter|quater|quinquies)?)(?:\s*[-–—.:]\s*(.*))?$/i;
+
+  const esLineaVacia = (line) => !/\S/.test(line);
+  const esEncabezadoPrevio = (line) => /^(?:ART[ÍI]CULO|ARTICULO|ART\.?|T[IÍ]TULO|CAP[IÍ]TULO|SECCI[ÓO]N|PARTE)\b/i.test(String(line).trim());
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    if (!line) continue;
-
     const match = line.match(encabezadoArticulo);
-    if (match) {
+    const canOpenArticulo = match && (prevLine === "" || esLineaVacia(prevLine) || esEncabezadoPrevio(prevLine));
+
+    if (canOpenArticulo) {
       if (actual) {
         articulos.push({
           numero: actual.numero,
@@ -845,12 +849,15 @@ function extraerArticulos(texto = "") {
         numero,
         texto: textoInicial ? [textoInicial] : [],
       };
+      prevLine = rawLine;
       continue;
     }
 
-    if (actual) {
+    if (actual && line) {
       actual.texto.push(line);
     }
+
+    prevLine = rawLine;
   }
 
   if (actual) {
@@ -1044,8 +1051,8 @@ function extraerNorma(html) {
     .replace(/<[^>]+>/g, " ");
 
   const textoMarcadoSinLimpiar = limpiarTextoNorma(posibleContenido);
-  const textoMarcado = normalizarSaltos(textoMarcadoSinLimpiar);
-  const textoPlano = limpiarBasuraResidual(textoMarcado.replace(/@@BOLD_(?:START|END)@@/g, ""));
+  const textoMarcado = normalizarSaltos(textoMarcadoSinLimpiar).replace(/@@BOLD_(?:START|END)@@/g, "");
+  const textoPlano = limpiarBasuraResidual(textoMarcado);
 
   const tituloRaw = extraerTituloNorma(html);
   const titulo = limpiarTituloNorma(tituloRaw);
@@ -1116,15 +1123,14 @@ function formatearTextoNormativo(texto = "") {
   ];
 
   const encabezadoDivision = new RegExp(
-    `^(?:@@BOLD_START@@\\s*)?(?:(?:PARTE|LIBRO)\\s+(?:${ordinalsAntes.join("|")})|(?:T[IÍ]TULO|CAP[IÍ]TULO|SECCI[ÓO]N)\\s+(?:${ordinalsDespues.join("|" )}|${romanNumerals.join("|" )}))(?:\\s*[-–—.:]\\s*(.*))?$`,
+    `^(?:(?:PARTE|LIBRO)\\s+(?:${ordinalsAntes.join("|")})|(?:T[IÍ]TULO|CAP[IÍ]TULO|SECCI[ÓO]N)\\s+(?:${ordinalsDespues.join("|" )}|${romanNumerals.join("|" )}))(?:\\s*[-–—.:]\\s*(.*))?$`,
     "i"
   );
-  const encabezadoArticulo = /^(?:@@BOLD_START@@\s*)?(?:ART[ÍI]CULO|ARTICULO|ART\.?)(?:\s+)(\d{1,4}(?:[°º]?|bis|ter|quater|quinquies)?)(?:\s*[-–—.:]\s*(.*))?$/i;
+  const encabezadoArticulo = /^(?:ART[ÍI]CULO|ARTICULO|ART\.?)(?:\s+)(\d{1,4}(?:[°º]?|bis|ter|quater|quinquies)?)(?:\s*[-–—.:]\s*(.*))?$/i;
 
-  const lines = normalizarSaltos(String(texto))
-    .split(/\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const rawLines = normalizarSaltos(String(texto)).split(/\n/);
+  const lines = rawLines.map((line) => line.trim());
+  let prevLine = "";
 
   const bloques = [];
   let actual = { type: "intro", title: "", lines: [] };
@@ -1157,13 +1163,17 @@ function formatearTextoNormativo(texto = "") {
       .replace(/\bSEXTO\b/gi, "Sexto")
       .trim();
 
-  for (const line of lines) {
+  for (let i = 0; i < rawLines.length; i++) {
+    const rawLine = rawLines[i];
+    const line = lines[i];
     const divisionMatch = line.match(encabezadoDivision);
     const articuloMatch = line.match(encabezadoArticulo);
 
-    if (divisionMatch) {
+    const puedeAbrir = !prevLine || !/\S/.test(prevLine) || /^(?:ART[ÍI]CULO|ARTICULO|ART\.?|T[IÍ]TULO|CAP[IÍ]TULO|SECCI[ÓO]N|PARTE)\b/i.test(String(prevLine).trim());
+
+    if (divisionMatch && puedeAbrir) {
       cerrarBloqueActual();
-      const tituloRaw = line.replace(/@@BOLD_START@@|@@BOLD_END@@/g, "").trim();
+      const tituloRaw = line.trim();
       const titulo = normalizarTituloDivision(tituloRaw);
       const resto = String(divisionMatch[1] || "").trim();
       actual = {
@@ -1171,10 +1181,11 @@ function formatearTextoNormativo(texto = "") {
         title: titulo,
         lines: resto ? [resto] : [],
       };
+      prevLine = rawLine;
       continue;
     }
 
-    if (articuloMatch) {
+    if (articuloMatch && puedeAbrir) {
       cerrarBloqueActual();
       const numero = String(articuloMatch[1] || "").replace(/[°º]$/i, "").trim();
       const resto = String(articuloMatch[2] || "").trim();
@@ -1183,10 +1194,17 @@ function formatearTextoNormativo(texto = "") {
         title: `Artículo ${numero}`,
         lines: resto ? [resto] : [],
       };
+      prevLine = rawLine;
       continue;
     }
 
-    actual.lines.push(line);
+    if (!/\S/.test(rawLine)) {
+      actual.lines.push("");
+    } else {
+      actual.lines.push(line);
+    }
+
+    prevLine = rawLine;
   }
 
   cerrarBloqueActual();

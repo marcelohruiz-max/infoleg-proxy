@@ -7,11 +7,86 @@ const PORT = 8787;
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static("public"));
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0",
   "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
 };
+
+const PWA_META = `
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <meta name="theme-color" content="#0f172a" />
+      <link rel="manifest" href="/manifest.webmanifest" />
+      <link rel="icon" type="image/svg+xml" href="/icons/icon-192x192.svg" />
+      <link rel="apple-touch-icon" href="/icons/icon-192x192.svg" />
+    `;
+
+const PWA_REGISTER_SCRIPT = `
+      <script>
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/service-worker.js')
+              .then(() => console.log('Service worker registrado'))
+              .catch((err) => console.warn('Service worker no pudo registrarse', err));
+          });
+        }
+      </script>
+    `;
+
+const PWA_NAV_STYLE = `
+      <style>
+        .top-nav {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          align-items: center;
+          justify-content: flex-start;
+          padding: 16px 0 18px;
+          margin-bottom: 18px;
+          border-bottom: 1px solid #e2e8f0;
+        }
+        .nav-link {
+          color: #0f172a;
+          background: #ffffff;
+          border: 1px solid #cbd5e1;
+          padding: 10px 14px;
+          border-radius: 12px;
+          text-decoration: none;
+          font-size: 0.95rem;
+          transition: background 0.2s ease, border-color 0.2s ease;
+        }
+        .nav-link:hover {
+          background: #f8fafc;
+          border-color: #94a3b8;
+        }
+        @media (max-width: 768px) {
+          .top-nav {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .nav-link {
+            width: 100%;
+            justify-content: center;
+          }
+        }
+      </style>
+    `;
+
+function renderTopNav(links = []) {
+  return `
+      <div class="top-nav">
+        ${links
+          .map(
+            (link) =>
+              `<a class="nav-link" href="${escaparHtml(link.href)}" ${link.attrs || ""}>${escaparHtml(
+                link.label
+              )}</a>`
+          )
+          .join("")}
+      </div>
+    `;
+}
 
 function decodeHtmlEntities(text = "") {
   return String(text)
@@ -390,7 +465,9 @@ function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {} }) {
     <html lang="es">
     <head>
       <meta charset="utf-8" />
+      ${PWA_META}
       <title>${escaparHtml(norma.titulo)} | Buscador Normativo</title>
+      ${PWA_NAV_STYLE}
       <style>
         body {
           font-family: system-ui, sans-serif;
@@ -480,6 +557,10 @@ function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {} }) {
       </style>
     </head>
     <body>
+      ${renderTopNav([
+        { href: '/', label: 'Inicio' },
+        { href: '/', label: 'Volver', attrs: 'onclick="event.preventDefault(); if (window.history.length > 1) { window.history.back(); } else { window.location.href = \'/\'; }"' },
+      ])}
       <div class="card">
         <h1>${escaparHtml(norma.titulo)}</h1>
         <div class="meta">
@@ -500,6 +581,7 @@ function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {} }) {
         <h2>Encabezado</h2>
         <pre>${escaparHtml(norma.encabezado || "")}</pre>
       </div>
+      ${PWA_REGISTER_SCRIPT}
     </body>
     </html>
   `;
@@ -940,7 +1022,9 @@ function renderListadoColeccion(titulo, items = []) {
     <html lang="es">
     <head>
       <meta charset="utf-8" />
+      ${PWA_META}
       <title>${escaparHtml(titulo)} | Buscador Normativo</title>
+      ${PWA_NAV_STYLE}
       <style>
         body {
           font-family: system-ui, sans-serif;
@@ -1022,6 +1106,10 @@ function renderListadoColeccion(titulo, items = []) {
       </style>
     </head>
     <body>
+      ${renderTopNav([
+        { href: '/', label: 'Inicio' },
+        { href: '/', label: 'Volver', attrs: 'onclick="event.preventDefault(); if (window.history.length > 1) { window.history.back(); } else { window.location.href = \'/\'; }"' },
+      ])}
       <div class="card">
         <h1>${escaparHtml(titulo)}</h1>
         <p class="sub">Selecciona una norma para consultar su ficha completa.</p>
@@ -1031,6 +1119,7 @@ function renderListadoColeccion(titulo, items = []) {
       </div>
 
       ${listado || `<div class="card">No se encontraron items en esta colección.</div>`}
+      ${PWA_REGISTER_SCRIPT}
     </body>
     </html>
   `;
@@ -1275,6 +1364,7 @@ function renderBuscadorHtml({
     <html lang="es">
     <head>
       <meta charset="utf-8" />
+      ${PWA_META}
       <title>Buscador Normativo</title>
       <style>
         body {
@@ -1312,6 +1402,13 @@ function renderBuscadorHtml({
           font-size: 1rem;
           line-height: 1.6;
           max-width: 760px;
+        }
+        .notice {
+          margin-top: 18px;
+          color: #334155;
+          font-size: 0.93rem;
+          line-height: 1.5;
+          opacity: 0.88;
         }
         .help {
           margin: 0;
@@ -1499,6 +1596,7 @@ function renderBuscadorHtml({
       <div class="card page-hero">
         <h1>Buscador Normativo</h1>
         <p class="sub">Consulte el repositorio normativo oficial de InfoLEG.</p>
+        <p class="notice">Esta aplicación consulta documentación oficial de InfoLEG y está diseñada para uso como herramienta de consulta normativa.</p>
       </div>
 
       <div class="navegacion">
@@ -1565,6 +1663,7 @@ function renderBuscadorHtml({
       </div>
 
       ${items}
+      ${PWA_REGISTER_SCRIPT}
     </body>
     </html>
   `;
@@ -1798,8 +1897,9 @@ app.get("/ver-texto", async (req, res) => {
       <html lang="es">
       <head>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        ${PWA_META}
         <title>${escaparHtml(norma.titulo)} | Texto de la Norma</title>
+        ${PWA_NAV_STYLE}
         <style>
           body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -1904,12 +2004,17 @@ app.get("/ver-texto", async (req, res) => {
         </style>
       </head>
       <body>
+        ${renderTopNav([
+          { href: '/', label: 'Inicio' },
+          { href: origen ? `/lector?url=${encodeURIComponent(origen)}` : '/', label: 'Volver a la ficha' },
+        ])}
         <div class="navegacion">
           <a href="/lector?url=${encodeURIComponent(origen || url)}">← Volver a la ficha</a>
         </div>
         <h1 class="titulo">${escaparHtml(norma.titulo)}</h1>
         <div class="contenido">${textoHtml}</div>
-      </body>
+${PWA_REGISTER_SCRIPT}
+    </body>
       </html>
     `;
 

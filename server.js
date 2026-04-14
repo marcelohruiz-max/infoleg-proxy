@@ -60,6 +60,12 @@ const PWA_NAV_STYLE = `
           background: #f8fafc;
           border-color: #94a3b8;
         }
+        .nav-link.is-active {
+          background: #0f172a;
+          border-color: #0f172a;
+          color: #ffffff;
+          font-weight: 600;
+        }
         @media (max-width: 768px) {
           .top-nav {
             flex-direction: column;
@@ -79,13 +85,52 @@ function renderTopNav(links = []) {
         ${links
           .map(
             (link) =>
-              `<a class="nav-link" href="${escaparHtml(link.href)}" ${link.attrs || ""}>${escaparHtml(
-                link.label
-              )}</a>`
+              `<a class="nav-link${link.active ? " is-active" : ""}" href="${escaparHtml(link.href)}" ${
+                link.active ? 'aria-current="page"' : ""
+              } ${link.attrs || ""}>${escaparHtml(link.label)}</a>`
           )
           .join("")}
       </div>
     `;
+}
+
+function buildPathWithParams(path, params = {}) {
+  const search = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      search.set(key, value);
+    }
+  });
+
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+function buildLectorHref(url, returnTo = "") {
+  return buildPathWithParams("/lector", { url, returnTo });
+}
+
+function buildVerTextoHref({ url, origen = "", modo = "", returnTo = "" }) {
+  return buildPathWithParams("/ver-texto", {
+    url,
+    origen,
+    modo,
+    returnTo,
+  });
+}
+
+function getContextualBackLink(returnTo = "", fallbackHref = "/") {
+  if (returnTo) {
+    return { href: returnTo, label: "Volver" };
+  }
+
+  return {
+    href: fallbackHref,
+    label: "Volver",
+    attrs:
+      'onclick="event.preventDefault(); if (window.history.length > 1) { window.history.back(); } else { window.location.href = this.href; }"',
+  };
 }
 
 function decodeHtmlEntities(text = "") {
@@ -437,24 +482,53 @@ function esIndiceTematico(norma, urlOrigen) {
   return false;
 }
 
-function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {} }) {
+function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {}, returnTo = "" }) {
   const esIndice = esIndiceTematico(norma, urlOrigen);
+  const fichaHref = buildLectorHref(urlOrigen, returnTo);
+  const backLink = getContextualBackLink(returnTo, "/");
   
   const botones = [
     opciones.textoActualizado && !esIndice
-      ? `<a class="boton-principal" href="/ver-texto?url=${encodeURIComponent(opciones.textoActualizado)}&origen=${encodeURIComponent(urlOrigen)}&modo=actualizado">Texto actualizado</a>`
+      ? `<a class="boton-principal" href="${escaparHtml(
+          buildVerTextoHref({
+            url: opciones.textoActualizado,
+            origen: urlOrigen,
+            modo: "actualizado",
+            returnTo: fichaHref,
+          })
+        )}">Texto actualizado</a>`
       : "",
     opciones.textoCompleto && !esIndice
-      ? `<a class="boton-secundario" href="/ver-texto?url=${encodeURIComponent(opciones.textoCompleto)}&origen=${encodeURIComponent(urlOrigen)}&modo=completo">Texto completo</a>`
+      ? `<a class="boton-secundario" href="${escaparHtml(
+          buildVerTextoHref({
+            url: opciones.textoCompleto,
+            origen: urlOrigen,
+            modo: "completo",
+            returnTo: fichaHref,
+          })
+        )}">Texto completo</a>`
       : "",
     opciones.regimenLegal
-      ? `<a class="boton-secundario" href="/ver-texto?url=${encodeURIComponent(opciones.regimenLegal)}&origen=${encodeURIComponent(urlOrigen)}&modo=regimen">Régimen legal</a>`
+      ? `<a class="boton-secundario" href="${escaparHtml(
+          buildVerTextoHref({
+            url: opciones.regimenLegal,
+            origen: urlOrigen,
+            modo: "regimen",
+            returnTo: fichaHref,
+          })
+        )}">Régimen legal</a>`
       : "",
     esIndice
       ? `<a class="boton-principal" href="${escaparHtml(urlOrigen)}" target="_blank" rel="noopener">Abrir índice oficial en Infoleg</a>`
       : "",
     (!opciones.textoActualizado && !opciones.textoCompleto && !esIndice)
-      ? `<a class="boton-principal" href="/ver-texto?url=${encodeURIComponent(urlOrigen)}">Ver texto completo</a>`
+      ? `<a class="boton-principal" href="${escaparHtml(
+          buildVerTextoHref({
+            url: urlOrigen,
+            origen: urlOrigen,
+            returnTo: fichaHref,
+          })
+        )}">Ver texto completo</a>`
       : "",
   ]
     .filter(Boolean)
@@ -559,7 +633,10 @@ function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {} }) {
     <body>
       ${renderTopNav([
         { href: '/', label: 'Inicio' },
-        { href: '/', label: 'Volver', attrs: 'onclick="event.preventDefault(); if (window.history.length > 1) { window.history.back(); } else { window.location.href = \'/\'; }"' },
+        { href: '/constituciones', label: 'Constituciones' },
+        { href: '/codigos', label: 'Códigos' },
+        backLink,
+        { href: fichaHref, label: 'Ficha', active: true },
       ])}
       <div class="card">
         <h1>${escaparHtml(norma.titulo)}</h1>
@@ -573,7 +650,13 @@ function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {} }) {
         <pre>${escaparHtml(norma.resumen || "")}</pre>
 
         <div class="acciones">
-          ${botones || `<a class="boton-principal" href="/ver-texto?url=${encodeURIComponent(urlOrigen)}">Ver texto completo</a>`}
+          ${botones || `<a class="boton-principal" href="${escaparHtml(
+            buildVerTextoHref({
+              url: urlOrigen,
+              origen: urlOrigen,
+              returnTo: fichaHref,
+            })
+          )}">Ver texto completo</a>`}
         </div>
       </div>
 
@@ -1003,14 +1086,14 @@ function escaparHtml(texto = "") {
     .replace(/>/g, "&gt;");
 }
 
-function renderListadoColeccion(titulo, items = []) {
+function renderListadoColeccion(titulo, items = [], currentPath = "") {
   const listado = items
     .map(
       (item) => `
       <div class="item">
         <div class="titulo">${escaparHtml(item.titulo)}</div>
         <div class="acciones">
-          <a class="boton-texto" href="/lector?url=${encodeURIComponent(item.url)}">Ver ficha</a>
+          <a class="boton-texto" href="${escaparHtml(buildLectorHref(item.url, currentPath))}">Ver ficha</a>
         </div>
       </div>
       `
@@ -1108,7 +1191,9 @@ function renderListadoColeccion(titulo, items = []) {
     <body>
       ${renderTopNav([
         { href: '/', label: 'Inicio' },
-        { href: '/', label: 'Volver', attrs: 'onclick="event.preventDefault(); if (window.history.length > 1) { window.history.back(); } else { window.location.href = \'/\'; }"' },
+        { href: '/constituciones', label: 'Constituciones', active: currentPath === '/constituciones' },
+        { href: '/codigos', label: 'Códigos', active: currentPath === '/codigos' },
+        getContextualBackLink("", "/"),
       ])}
       <div class="card">
         <h1>${escaparHtml(titulo)}</h1>
@@ -1336,6 +1421,7 @@ function renderBuscadorHtml({
   numero = "",
   anio = "",
   resultados = [],
+  currentPath = "/",
 } = {}) {
   const items = resultados.length
     ? resultados
@@ -1349,7 +1435,7 @@ function renderBuscadorHtml({
   </div>
   <div class="url">${escaparHtml(r.url)}</div>
   <div class="acciones">
-    <a class="boton-texto" href="/lector?url=${encodeURIComponent(r.url)}">Ver ficha</a>
+    <a class="boton-texto" href="${escaparHtml(buildLectorHref(r.url, currentPath))}">Ver ficha</a>
   </div>
 </div>
           `
@@ -1366,6 +1452,7 @@ function renderBuscadorHtml({
       <meta charset="utf-8" />
       ${PWA_META}
       <title>Buscador Normativo</title>
+      ${PWA_NAV_STYLE}
       <style>
         body {
           font-family: system-ui, sans-serif;
@@ -1593,6 +1680,11 @@ function renderBuscadorHtml({
       </style>
     </head>
     <body>
+      ${renderTopNav([
+        { href: '/', label: 'Inicio', active: true },
+        { href: '/constituciones', label: 'Constituciones' },
+        { href: '/codigos', label: 'Códigos' },
+      ])}
       <div class="card page-hero">
         <h1>Buscador Normativo</h1>
         <p class="sub">Consulte el repositorio normativo oficial de InfoLEG.</p>
@@ -1680,9 +1772,10 @@ app.get("/", async (req, res) => {
     const tipo = String(req.query.tipo || "").trim();
     const numero = String(req.query.numero || "").trim();
     const anio = String(req.query.anio || "").trim();
+    const currentPath = req.originalUrl || "/";
 
     if (!q && !tipo && !numero && !anio) {
-      return res.send(renderBuscadorHtml());
+      return res.send(renderBuscadorHtml({ currentPath }));
     }
 
     let html = "";
@@ -1716,6 +1809,7 @@ app.get("/", async (req, res) => {
       numero,
       anio,
       resultados,
+      currentPath,
     })
   );
   } catch (e) {
@@ -1730,7 +1824,7 @@ app.get("/constituciones", async (req, res) => {
   try {
     const html = await fetchHTML("https://www.infoleg.gob.ar/?page_id=63");
     const items = extraerItemsColeccion(html);
-    res.send(renderListadoColeccion("Constitución y tratados constitucionales", items));
+    res.send(renderListadoColeccion("Constitución y tratados constitucionales", items, req.originalUrl || "/constituciones"));
   } catch (e) {
     res.status(500).send(`Error: ${escaparHtml(e.message)}`);
   }
@@ -1740,7 +1834,7 @@ app.get("/codigos", async (req, res) => {
   try {
     const html = await fetchHTML("https://www.infoleg.gob.ar/?page_id=67");
     const items = extraerItemsColeccion(html);
-    res.send(renderListadoColeccion("Códigos", items));
+    res.send(renderListadoColeccion("Códigos", items, req.originalUrl || "/codigos"));
   } catch (e) {
     res.status(500).send(`Error: ${escaparHtml(e.message)}`);
   }
@@ -1804,6 +1898,7 @@ app.get("/api/infoleg/norma", async (req, res) => {
 app.get("/lector", async (req, res) => {
   try {
     const url = String(req.query.url || "").trim();
+    const returnTo = String(req.query.returnTo || "").trim();
 
     if (!url) {
       return res.status(400).send("Falta el parámetro url");
@@ -1820,6 +1915,7 @@ app.get("/lector", async (req, res) => {
         urlOrigen: url,
         norma,
         opciones,
+        returnTo,
       })
     );
   } catch (e) {
@@ -1863,6 +1959,9 @@ app.get("/ver-texto", async (req, res) => {
     let url = String(req.query.url || "").trim();
     const origen = String(req.query.origen || "").trim();
     const modo = String(req.query.modo || "").trim();
+    const returnTo = String(req.query.returnTo || "").trim();
+    const fichaHref = buildLectorHref(origen || url, returnTo);
+    const backLink = getContextualBackLink(returnTo, fichaHref);
 
     if (!url) {
       return res.status(400).send("Falta el parámetro url");
@@ -2006,11 +2105,12 @@ app.get("/ver-texto", async (req, res) => {
       <body>
         ${renderTopNav([
           { href: '/', label: 'Inicio' },
-          { href: origen ? `/lector?url=${encodeURIComponent(origen)}` : '/', label: 'Volver a la ficha' },
+          { href: '/constituciones', label: 'Constituciones' },
+          { href: '/codigos', label: 'Códigos' },
+          backLink,
+          { href: fichaHref, label: 'Ficha' },
+          { href: buildVerTextoHref({ url, origen, modo, returnTo }), label: 'Texto', active: true },
         ])}
-        <div class="navegacion">
-          <a href="/lector?url=${encodeURIComponent(origen || url)}">← Volver a la ficha</a>
-        </div>
         <h1 class="titulo">${escaparHtml(norma.titulo)}</h1>
         <div class="contenido">${textoHtml}</div>
 ${PWA_REGISTER_SCRIPT}

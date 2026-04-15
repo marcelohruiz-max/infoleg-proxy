@@ -120,6 +120,60 @@ function buildVerTextoHref({ url, origen = "", modo = "", returnTo = "" }) {
   });
 }
 
+function buildVerBloqueIndiceHref({
+  url,
+  anchor = "",
+  origen = "",
+  returnTo = "",
+  nombre = "",
+  parte = "",
+  libro = "",
+  titulo = "",
+  capitulo = "",
+  epigrafe = "",
+  rango = "",
+  fuente = "",
+}) {
+  return buildPathWithParams("/ver-bloque-indice", {
+    url,
+    anchor,
+    origen,
+    returnTo,
+    nombre,
+    parte,
+    libro,
+    titulo,
+    capitulo,
+    epigrafe,
+    rango,
+    fuente,
+  });
+}
+
+function resolverFuenteBloqueIndice({ url = "", anchor = "", fuente = "" } = {}) {
+  const fuenteNormalizada = limpiarUrlResultado(String(fuente || "").trim());
+  const urlNormalizada = limpiarUrlResultado(String(url || "").trim());
+
+  if (fuenteNormalizada) {
+    const { baseUrl, anchor: anchorFuente } = separarUrlYFragmento(fuenteNormalizada);
+    return {
+      url: baseUrl || urlNormalizada,
+      anchor: anchor || anchorFuente,
+      fuente: fuenteNormalizada,
+    };
+  }
+
+  const fuenteDerivada = urlNormalizada
+    ? `${urlNormalizada}${anchor ? `#${anchor}` : ""}`
+    : "";
+
+  return {
+    url: urlNormalizada,
+    anchor,
+    fuente: fuenteDerivada,
+  };
+}
+
 function getContextualBackLink(returnTo = "", fallbackHref = "/") {
   if (returnTo) {
     return { href: returnTo, label: "Volver" };
@@ -411,6 +465,20 @@ function limpiarUrlResultado(url = "") {
     .replace(/&$/, "");
 }
 
+function separarUrlYFragmento(url = "") {
+  const raw = String(url || "").trim();
+  const hashIndex = raw.indexOf("#");
+
+  if (hashIndex === -1) {
+    return { baseUrl: raw, anchor: "" };
+  }
+
+  return {
+    baseUrl: raw.slice(0, hashIndex),
+    anchor: raw.slice(hashIndex + 1).trim(),
+  };
+}
+
 function insertarBaseHref(html = "", baseUrl = "") {
   if (!baseUrl || /<base[^>]*>/i.test(html)) return html;
   return String(html).replace(/<head([^>]*)>/i, `<head$1><base href="${escaparHtml(baseUrl)}">`);
@@ -455,39 +523,711 @@ function extraerOpcionesTextoNorma(html = "", urlOrigen = "") {
   };
 }
 
-function esIndiceTematico(norma, urlOrigen) {
-  // Detectar normas que ofrecen índice temático en lugar de texto lineal
-  const titulo = String(norma.titulo || "").toLowerCase();
-  const texto = String(norma.textoPlano || "").toLowerCase();
-  
-  // Casos específicos conocidos
-  if (urlOrigen.includes('id=109481') || urlOrigen.includes('id=109500')) {
-    return true;
+function obtenerDestinoLecturaPreferido(opciones = {}, urlOrigen = "") {
+  if (opciones.textoActualizado) {
+    return {
+      url: opciones.textoActualizado,
+      modo: "actualizado",
+    };
   }
-  
-  // Códigos que contienen "INDICE TEMATICO" en su texto
-  if (titulo.includes('código') && texto.includes('indice tematico')) {
-    return true;
+
+  if (opciones.textoCompleto) {
+    return {
+      url: opciones.textoCompleto,
+      modo: "completo",
+    };
   }
-  
-  // Otros casos: textos que tienen estructura de índice sin artículos consecutivos
-  const tieneEstructuraIndice = (texto.match(/\blibro\b/g) || []).length > 2 && 
-                                (texto.match(/\btitulo\b/g) || []).length > 5;
-  const tienePocosArticulos = (texto.match(/\bart\.\s*\d+/g) || []).length < 10;
-  
-  if (tieneEstructuraIndice && tienePocosArticulos) {
-    return true;
-  }
-  
-  return false;
+
+  return {
+    url: urlOrigen,
+    modo: "",
+  };
 }
 
-function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {}, returnTo = "" }) {
-  const esIndice = esIndiceTematico(norma, urlOrigen);
+function limpiarCeldaIndice(html = "") {
+  return decodeHtmlEntities(
+    String(html)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<\/div>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/ *\n */g, "\n")
+      .trim()
+  );
+}
+
+function normalizarEtiquetaIndice(texto = "") {
+  const limpio = limpiarCeldaIndice(texto)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!limpio) return "";
+
+  return limpio
+    .replace(/\bPARTE\b/gi, "Parte")
+    .replace(/\bLIBRO\b/gi, "Libro")
+    .replace(/\bT[IÍ]TULO\b/gi, "Título")
+    .replace(/\bCAP[IÍ]TULO\b/gi, "Capítulo")
+    .replace(/\bSECCI[ÓO]N\b/gi, "Sección");
+}
+
+function extraerIndiceTematico(html = "", urlBase = "") {
+  const fuente = stripScriptsAndStyles(String(html || ""));
+  const idxIndice = fuente.search(/INDICE\s+TEMATICO/i);
+
+  if (idxIndice === -1) {
+    return null;
+  }
+
+  let bloqueIndice = fuente.slice(idxIndice);
+  const corte = bloqueIndice.search(/<a[^>]+href=["']#1["'][^>]*>/i);
+
+  if (corte > 0) {
+    bloqueIndice = bloqueIndice.slice(0, corte);
+  }
+
+  const tituloNorma = limpiarTituloNorma(extraerTituloNorma(html));
+  const tokens = [];
+  const tokenRegex = /<(p|div)[^>]*?(?:align=["']center["']|style=["'][^"']*text-align\s*:\s*center[^"']*["'])[^>]*>([\s\S]*?)<\/\1>|<table[\s\S]*?<\/table>/gi;
+  let match;
+
+  while ((match = tokenRegex.exec(bloqueIndice))) {
+    if (match[0].toLowerCase().startsWith("<table")) {
+      tokens.push({ type: "table", html: match[0] });
+      continue;
+    }
+
+    const tablasInternas = [...String(match[0]).matchAll(/<table[\s\S]*?<\/table>/gi)];
+
+    if (tablasInternas.length > 0) {
+      for (const tabla of tablasInternas) {
+        tokens.push({ type: "table", html: tabla[0] });
+      }
+      continue;
+    }
+
+    const texto = normalizarEtiquetaIndice(match[2]);
+    if (texto) {
+      tokens.push({ type: "heading", text: texto });
+    }
+  }
+
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  const contexto = {
+    parte: "",
+    libro: "",
+    titulo: "",
+    capitulo: "",
+  };
+  const items = [];
+  let cantidadConRango = 0;
+  let cantidadConEnlace = 0;
+
+  for (const token of tokens) {
+    if (token.type === "heading") {
+      const texto = token.text;
+      const textoUpper = texto.toUpperCase();
+
+      if (/^INDICE\s+TEMATICO$/i.test(texto)) {
+        continue;
+      }
+
+      if (textoUpper === tituloNorma.toUpperCase()) {
+        continue;
+      }
+
+      if (/^PARTE\b/i.test(texto)) {
+        contexto.parte = texto;
+        contexto.libro = "";
+        contexto.titulo = "";
+        contexto.capitulo = "";
+        continue;
+      }
+
+      if (/^LIBRO\b/i.test(texto)) {
+        contexto.libro = texto;
+        contexto.titulo = "";
+        contexto.capitulo = "";
+        continue;
+      }
+
+      if (/^T[IÍ]TULO\b/i.test(texto)) {
+        contexto.titulo = texto;
+        contexto.capitulo = "";
+        continue;
+      }
+
+      if (/^CAP[IÍ]TULO\b/i.test(texto)) {
+        contexto.capitulo = texto;
+      }
+
+      continue;
+    }
+
+    const filas = [...token.html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
+
+    for (const fila of filas) {
+      const celdas = [...String(fila[1] || "").matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => m[1]);
+
+      if (celdas.length < 3) {
+        continue;
+      }
+
+      const enlaceMatch = celdas[0].match(/href=(?:"([^"]+)"|'([^']+)')/i);
+      const enlaceOficial = enlaceMatch
+        ? limpiarUrlResultado(absolutizarUrl(enlaceMatch[1] || enlaceMatch[2] || "", urlBase))
+        : "";
+      const { baseUrl: bloqueUrl, anchor } = separarUrlYFragmento(enlaceOficial);
+
+      const rubro = normalizarEtiquetaIndice(celdas[0]);
+      const epigrafe = limpiarCeldaIndice(celdas[1]).replace(/\s+/g, " ").trim();
+      const rangoArticulos = limpiarCeldaIndice(celdas[2]).replace(/\s+/g, " ").trim();
+      const item = {
+        parte: contexto.parte,
+        libro: contexto.libro,
+        titulo: contexto.titulo,
+        capitulo: contexto.capitulo,
+        epigrafe,
+        rangoArticulos,
+        bloqueUrl,
+        anchor,
+        enlaceOficial,
+      };
+
+      if (/^T[IÍ]TULO\b/i.test(rubro)) {
+        item.titulo = rubro;
+        item.capitulo = "";
+      } else if (/^CAP(?:\.|[IÍ]TULO)\b/i.test(rubro)) {
+        item.capitulo = rubro.replace(/^Cap\.\s*/i, "Capítulo ");
+      } else if (/^SECCI[ÓO]N\b/i.test(rubro)) {
+        item.capitulo = rubro;
+      } else if (rubro && !item.epigrafe) {
+        item.epigrafe = rubro;
+      }
+
+      if (!item.epigrafe && !item.rangoArticulos) {
+        continue;
+      }
+
+      if (/art/i.test(item.rangoArticulos)) {
+        cantidadConRango += 1;
+      }
+
+      if (item.enlaceOficial) {
+        cantidadConEnlace += 1;
+      }
+
+      items.push(item);
+    }
+  }
+
+  if (items.length < 3 || cantidadConRango < 3) {
+    return null;
+  }
+
+  return {
+    nombre: tituloNorma || "Código",
+    titulo: "Índice temático",
+    items,
+    urlFuente: urlBase,
+    tieneEnlacesProfundos: cantidadConEnlace > 0,
+  };
+}
+
+function renderIndiceTematicoHtml({
+  indice,
+  fichaHref = "",
+  backLink = { href: "/", label: "Volver" },
+  textoHref = "",
+  origenUrl = "",
+}) {
+  const grupos = [];
+
+  for (const item of indice.items) {
+    const ultima = grupos[grupos.length - 1];
+    const mismaCabecera =
+      ultima &&
+      ultima.parte === item.parte &&
+      ultima.libro === item.libro;
+
+    if (mismaCabecera) {
+      ultima.items.push(item);
+      continue;
+    }
+
+    grupos.push({
+      parte: item.parte,
+      libro: item.libro,
+      items: [item],
+    });
+  }
+
+  const gruposHtml = grupos
+    .map((grupo) => {
+      const itemsHtml = grupo.items
+        .map((item) => {
+          const jerarquia = [item.titulo, item.capitulo].filter(Boolean).join(" · ");
+          const fuenteBloque = item.enlaceOficial || (item.bloqueUrl ? `${item.bloqueUrl}${item.anchor ? `#${item.anchor}` : ""}` : "");
+          const bloqueHref = fuenteBloque
+            ? buildVerBloqueIndiceHref({
+                url: item.bloqueUrl,
+                anchor: item.anchor,
+                returnTo: textoHref,
+                origen: origenUrl,
+                nombre: indice.nombre,
+                parte: item.parte,
+                libro: item.libro,
+                titulo: item.titulo,
+                capitulo: item.capitulo,
+                epigrafe: item.epigrafe,
+                rango: item.rangoArticulos,
+                fuente: fuenteBloque,
+              })
+            : "";
+          const enlacePrincipal = bloqueHref
+            ? `<a class="indice-link indice-link-primary" href="${escaparHtml(bloqueHref)}">Leer bloque</a>`
+            : "";
+          const enlaceSecundario = item.enlaceOficial
+            ? `<a class="indice-link" href="${escaparHtml(item.enlaceOficial)}" target="_blank" rel="noopener">Abrir fuente oficial</a>`
+            : "";
+
+          return `
+            <article class="indice-item">
+              ${jerarquia ? `<div class="indice-jerarquia">${escaparHtml(jerarquia)}</div>` : ""}
+              <h3>${escaparHtml(item.epigrafe || "Bloque temático")}</h3>
+              ${item.rangoArticulos ? `<div class="indice-rango">${escaparHtml(item.rangoArticulos)}</div>` : ""}
+              <div class="indice-actions">
+                ${enlacePrincipal}
+                ${enlaceSecundario}
+              </div>
+            </article>
+          `;
+        })
+        .join("");
+
+      return `
+        <section class="indice-grupo">
+          ${grupo.parte ? `<div class="indice-parte">${escaparHtml(grupo.parte)}</div>` : ""}
+          ${grupo.libro ? `<h2>${escaparHtml(grupo.libro)}</h2>` : ""}
+          <div class="indice-listado">${itemsHtml}</div>
+        </section>
+      `;
+    })
+    .join("");
+
+  return `
+    <!doctype html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8" />
+      ${PWA_META}
+      <title>${escaparHtml(indice.nombre)} | Índice temático</title>
+      ${PWA_NAV_STYLE}
+      <style>
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          max-width: 1080px;
+          margin: 0 auto;
+          padding: 24px;
+          line-height: 1.6;
+          background: #f8fafc;
+          color: #0f172a;
+        }
+        .hero,
+        .indice-grupo,
+        .info-card {
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 18px;
+          box-shadow: 0 1px 10px rgba(15, 23, 42, 0.06);
+        }
+        .hero {
+          padding: 28px;
+          margin-bottom: 22px;
+        }
+        .hero h1 {
+          margin: 0 0 6px;
+          font-size: 1.85rem;
+        }
+        .hero p {
+          margin: 0;
+          color: #475569;
+        }
+        .hero-badges {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          margin-top: 16px;
+        }
+        .badge {
+          background: #e2e8f0;
+          color: #0f172a;
+          border-radius: 999px;
+          padding: 6px 12px;
+          font-size: 0.9rem;
+          font-weight: 600;
+        }
+        .hero-actions {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-top: 18px;
+        }
+        .hero-actions a,
+        .indice-link {
+          display: inline-block;
+          text-decoration: none;
+          border-radius: 12px;
+          padding: 10px 14px;
+          font-size: 0.95rem;
+        }
+        .hero-actions .primary {
+          background: #0f172a;
+          color: #ffffff;
+        }
+        .hero-actions .secondary,
+        .indice-link {
+          background: #e2e8f0;
+          color: #0f172a;
+        }
+        .indice-actions {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .indice-link-primary {
+          background: #0f172a;
+          color: #ffffff;
+        }
+        .contenido {
+          display: grid;
+          gap: 18px;
+        }
+        .indice-grupo {
+          padding: 20px;
+        }
+        .indice-parte {
+          font-size: 0.8rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: #475569;
+          margin-bottom: 8px;
+          font-weight: 700;
+        }
+        .indice-grupo h2 {
+          margin: 0 0 16px;
+          font-size: 1.2rem;
+        }
+        .indice-listado {
+          display: grid;
+          gap: 14px;
+        }
+        .indice-item {
+          border: 1px solid #e2e8f0;
+          border-radius: 14px;
+          padding: 16px;
+          background: #fcfdff;
+        }
+        .indice-item h3 {
+          margin: 4px 0 8px;
+          font-size: 1.02rem;
+        }
+        .indice-jerarquia {
+          color: #334155;
+          font-weight: 600;
+        }
+        .indice-rango {
+          color: #0f172a;
+          font-weight: 700;
+          margin-bottom: 12px;
+        }
+        @media (max-width: 768px) {
+          body {
+            padding: 16px;
+          }
+          .hero,
+          .indice-grupo {
+            padding: 18px;
+          }
+          .hero h1 {
+            font-size: 1.45rem;
+          }
+          .hero-actions a,
+          .indice-link {
+            width: 100%;
+            text-align: center;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      ${renderTopNav([
+        { href: "/", label: "Inicio" },
+        { href: "/constituciones", label: "Constituciones" },
+        { href: "/codigos", label: "Códigos" },
+        backLink,
+        { href: fichaHref, label: "Ficha" },
+        { href: textoHref, label: "Texto", active: true },
+      ])}
+      <section class="hero">
+        <h1>${escaparHtml(indice.nombre)}</h1>
+        <p>${escaparHtml(indice.titulo)}</p>
+        <div class="hero-badges">
+          <span class="badge">${indice.items.length} bloques indexados</span>
+          <span class="badge">${indice.tieneEnlacesProfundos ? "Con enlaces oficiales por bloque" : "Con acceso oficial al texto"}</span>
+        </div>
+        <div class="hero-actions">
+          <a class="primary" href="${escaparHtml(indice.urlFuente)}" target="_blank" rel="noopener">Abrir fuente oficial</a>
+          <a class="secondary" href="${escaparHtml(fichaHref)}">Volver a la ficha</a>
+        </div>
+      </section>
+      <main class="contenido">
+        ${gruposHtml}
+      </main>
+      ${PWA_REGISTER_SCRIPT}
+    </body>
+    </html>
+  `;
+}
+
+function extraerBloqueIndiceDesdeHtml(html = "", anchor = "") {
+  const fuente = stripScriptsAndStyles(String(html || ""));
+  const anchorEscapado = String(anchor || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  if (!anchorEscapado) {
+    return null;
+  }
+
+  const patronInicio = new RegExp(
+    `<a[^>]+(?:name|id)=["']${anchorEscapado}["'][^>]*>[\\s\\S]*?<\\/a>`,
+    "i"
+  );
+  const inicioMatch = fuente.match(patronInicio);
+
+  if (!inicioMatch || inicioMatch.index === undefined) {
+    return null;
+  }
+
+  const inicio = inicioMatch.index;
+  const despuesDelInicio = inicio + inicioMatch[0].length;
+  const resto = fuente.slice(despuesDelInicio);
+  const siguienteAnchorMatch = resto.match(/<a[^>]+(?:name|id)=["'][^"']+["'][^>]*>/i);
+  const fin = siguienteAnchorMatch && siguienteAnchorMatch.index !== undefined
+    ? despuesDelInicio + siguienteAnchorMatch.index
+    : fuente.length;
+
+  const encabezadoHtml = inicioMatch[0];
+  const bloqueHtml = `${encabezadoHtml}${fuente.slice(despuesDelInicio, fin)}`;
+  const textoBloque = limpiarTextoNorma(
+    bloqueHtml
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/div>/gi, "\n")
+      .replace(/<\/tr>/gi, "\n")
+      .replace(/<\/li>/gi, "\n")
+      .replace(/<li[^>]*>/gi, "- ")
+      .replace(/<[^>]+>/g, " ")
+  );
+  const textoNormalizado = normalizarSaltos(textoBloque);
+  const lineas = textoNormalizado.split("\n").map((linea) => linea.trim()).filter(Boolean);
+  const encabezado = lineas.shift() || "";
+  const contenido = lineas.join("\n").trim();
+
+  if (!encabezado && !contenido) {
+    return null;
+  }
+
+  return {
+    encabezado,
+    contenido,
+  };
+}
+
+function extraerBloqueIndiceFallback(html = "") {
+  const norma = extraerNorma(html);
+  const encabezado = String(
+    norma.titulo || norma.encabezado || ""
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  const contenido = String(norma.textoPlano || norma.encabezado || "")
+    .replace(/\s+\n/g, "\n")
+    .trim();
+
+  if (!encabezado && !contenido) {
+    return null;
+  }
+
+  return {
+    encabezado,
+    contenido,
+  };
+}
+
+function renderBloqueIndiceHtml({
+  nombre = "",
+  parte = "",
+  libro = "",
+  titulo = "",
+  capitulo = "",
+  epigrafe = "",
+  rango = "",
+  bloque = { encabezado: "", contenido: "" },
+  fichaHref = "",
+  backLink = { href: "/", label: "Volver" },
+  indiceHref = "",
+  fuente = "",
+}) {
+  const contenidoHtml = escaparHtml(bloque.contenido || "").replace(/\n/g, "<br>");
+  const subtitulo = [parte, libro, titulo, capitulo].filter(Boolean);
+
+  return `
+    <!doctype html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8" />
+      ${PWA_META}
+      <title>${escaparHtml(epigrafe || nombre || "Bloque indexado")} | Lector</title>
+      ${PWA_NAV_STYLE}
+      <style>
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          max-width: 900px;
+          margin: 0 auto;
+          padding: 24px;
+          line-height: 1.7;
+          background: #f8fafc;
+          color: #0f172a;
+        }
+        .card {
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 18px;
+          box-shadow: 0 1px 10px rgba(15, 23, 42, 0.06);
+          padding: 24px;
+          margin-bottom: 18px;
+        }
+        .eyebrow {
+          color: #475569;
+          font-size: 0.9rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+        h1 {
+          margin: 8px 0 10px;
+          font-size: 1.8rem;
+          line-height: 1.2;
+        }
+        .meta {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          margin-top: 12px;
+        }
+        .meta span {
+          background: #e2e8f0;
+          border-radius: 999px;
+          padding: 6px 12px;
+          font-size: 0.9rem;
+          font-weight: 600;
+        }
+        .acciones {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-top: 18px;
+        }
+        .acciones a {
+          display: inline-block;
+          text-decoration: none;
+          border-radius: 12px;
+          padding: 10px 14px;
+          font-size: 0.95rem;
+        }
+        .acciones .primary {
+          background: #0f172a;
+          color: #ffffff;
+        }
+        .acciones .secondary {
+          background: #e2e8f0;
+          color: #0f172a;
+        }
+        .contenido {
+          white-space: pre-wrap;
+          color: #334155;
+        }
+        @media (max-width: 768px) {
+          body {
+            padding: 16px;
+          }
+          .card {
+            padding: 18px;
+          }
+          h1 {
+            font-size: 1.45rem;
+          }
+          .acciones a {
+            width: 100%;
+            text-align: center;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      ${renderTopNav([
+        { href: "/", label: "Inicio" },
+        { href: "/constituciones", label: "Constituciones" },
+        { href: "/codigos", label: "Códigos" },
+        backLink,
+        { href: fichaHref, label: "Ficha" },
+        { href: indiceHref, label: "Índice" },
+        { href: indiceHref, label: "Bloque", active: true },
+      ])}
+      <section class="card">
+        <div class="eyebrow">${escaparHtml(nombre || "Código indexado")}</div>
+        <h1>${escaparHtml(epigrafe || bloque.encabezado || "Bloque")}</h1>
+        ${subtitulo.length ? `<p>${escaparHtml(subtitulo.join(" · "))}</p>` : ""}
+        <div class="meta">
+          ${rango ? `<span>${escaparHtml(rango)}</span>` : ""}
+          ${bloque.encabezado ? `<span>${escaparHtml(bloque.encabezado)}</span>` : ""}
+        </div>
+        <div class="acciones">
+          <a class="primary" href="${escaparHtml(indiceHref)}">Volver al índice</a>
+          ${fuente ? `<a class="secondary" href="${escaparHtml(fuente)}" target="_blank" rel="noopener">Abrir fuente oficial</a>` : ""}
+        </div>
+      </section>
+      <section class="card">
+        <div class="contenido">${contenidoHtml}</div>
+      </section>
+      ${PWA_REGISTER_SCRIPT}
+    </body>
+    </html>
+  `;
+}
+
+function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {}, returnTo = "", indiceTematico = null }) {
+  const esIndice = Boolean(indiceTematico);
   const fichaHref = buildLectorHref(urlOrigen, returnTo);
   const backLink = getContextualBackLink(returnTo, "/");
+  const destinoLectura = obtenerDestinoLecturaPreferido(opciones, urlOrigen);
   
   const botones = [
+    esIndice
+      ? `<a class="boton-principal" href="${escaparHtml(
+          buildVerTextoHref({
+            url: destinoLectura.url,
+            origen: urlOrigen,
+            modo: destinoLectura.modo,
+            returnTo: fichaHref,
+          })
+        )}">Ver índice temático</a>`
+      : "",
     opciones.textoActualizado && !esIndice
       ? `<a class="boton-principal" href="${escaparHtml(
           buildVerTextoHref({
@@ -519,7 +1259,7 @@ function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {}, returnTo =
         )}">Régimen legal</a>`
       : "",
     esIndice
-      ? `<a class="boton-principal" href="${escaparHtml(urlOrigen)}" target="_blank" rel="noopener">Abrir índice oficial en Infoleg</a>`
+      ? `<a class="boton-secundario" href="${escaparHtml(destinoLectura.url)}" target="_blank" rel="noopener">Abrir índice oficial en Infoleg</a>`
       : "",
     (!opciones.textoActualizado && !opciones.textoCompleto && !esIndice)
       ? `<a class="boton-principal" href="${escaparHtml(
@@ -1907,6 +2647,17 @@ app.get("/lector", async (req, res) => {
     const html = await fetchHTML(url);
     const norma = extraerNorma(html);
     const opciones = extraerOpcionesTextoNorma(html, url);
+    const destinoLectura = obtenerDestinoLecturaPreferido(opciones, url);
+    let indiceTematico = extraerIndiceTematico(html, url);
+
+    if (!indiceTematico && destinoLectura.url && destinoLectura.url !== url) {
+      try {
+        const htmlLectura = await fetchHTML(destinoLectura.url);
+        indiceTematico = extraerIndiceTematico(htmlLectura, destinoLectura.url);
+      } catch (innerError) {
+        console.warn("No se pudo inspeccionar índice temático en texto preferido:", innerError.message);
+      }
+    }
 
     console.log("OPCIONES DETECTADAS:", opciones);
 
@@ -1916,6 +2667,7 @@ app.get("/lector", async (req, res) => {
         norma,
         opciones,
         returnTo,
+        indiceTematico,
       })
     );
   } catch (e) {
@@ -1954,6 +2706,63 @@ app.get("/debug-opciones", async (req, res) => {
   }
 });
 
+app.get("/ver-bloque-indice", async (req, res) => {
+  try {
+    const url = String(req.query.url || "").trim();
+    const anchor = String(req.query.anchor || "").trim();
+    const origen = String(req.query.origen || "").trim();
+    const returnTo = String(req.query.returnTo || "").trim();
+    const nombre = String(req.query.nombre || "").trim();
+    const parte = String(req.query.parte || "").trim();
+    const libro = String(req.query.libro || "").trim();
+    const titulo = String(req.query.titulo || "").trim();
+    const capitulo = String(req.query.capitulo || "").trim();
+    const epigrafe = String(req.query.epigrafe || "").trim();
+    const rango = String(req.query.rango || "").trim();
+    const fuente = String(req.query.fuente || "").trim();
+    const fuenteResuelta = resolverFuenteBloqueIndice({ url, anchor, fuente });
+    const urlBloque = fuenteResuelta.url;
+    const anchorBloque = fuenteResuelta.anchor;
+    const fuenteOficial = fuenteResuelta.fuente;
+
+    if (!urlBloque) {
+      return res.status(400).send("Falta una fuente válida para abrir el bloque indexado");
+    }
+
+    const html = await fetchHTML(urlBloque);
+    const bloque = anchorBloque
+      ? extraerBloqueIndiceDesdeHtml(html, anchorBloque) || extraerBloqueIndiceFallback(html)
+      : extraerBloqueIndiceFallback(html);
+
+    if (!bloque) {
+      return res.status(404).send("No se pudo localizar el contenido solicitado en la fuente oficial");
+    }
+
+    const fichaHref = buildLectorHref(origen || urlBloque, returnTo);
+    const indiceHref = returnTo || buildVerTextoHref({ url: urlBloque, origen, returnTo: fichaHref });
+    const backLink = getContextualBackLink(returnTo, indiceHref);
+
+    res.send(
+      renderBloqueIndiceHtml({
+        nombre,
+        parte,
+        libro,
+        titulo,
+        capitulo,
+        epigrafe,
+        rango,
+        bloque,
+        fichaHref,
+        backLink,
+        indiceHref,
+        fuente: fuenteOficial,
+      })
+    );
+  } catch (e) {
+    res.status(500).send(`Error: ${escaparHtml(e.message)}`);
+  }
+});
+
 app.get("/ver-texto", async (req, res) => {
   try {
     let url = String(req.query.url || "").trim();
@@ -1982,11 +2791,19 @@ app.get("/ver-texto", async (req, res) => {
     }
 
     const norma = extraerNorma(html);
+    const indiceTematico = extraerIndiceTematico(html, url);
+    const textoHref = buildVerTextoHref({ url, origen, modo, returnTo });
 
-    // Verificar si es índice temático
-    if (esIndiceTematico(norma, origen || url)) {
-      // Redirigir al sitio oficial de Infoleg
-      return res.redirect(origen || url);
+    if (indiceTematico) {
+      return res.send(
+        renderIndiceTematicoHtml({
+          indice: indiceTematico,
+          fichaHref,
+          backLink,
+          textoHref,
+          origenUrl: origen || url,
+        })
+      );
     }
 
     const textoHtml = formatearTextoNormativo(norma.textoPlano).replace(/@@BOLD_(?:START|END)@@/g, "");
@@ -2109,7 +2926,7 @@ app.get("/ver-texto", async (req, res) => {
           { href: '/codigos', label: 'Códigos' },
           backLink,
           { href: fichaHref, label: 'Ficha' },
-          { href: buildVerTextoHref({ url, origen, modo, returnTo }), label: 'Texto', active: true },
+          { href: textoHref, label: 'Texto', active: true },
         ])}
         <h1 class="titulo">${escaparHtml(norma.titulo)}</h1>
         <div class="contenido">${textoHtml}</div>

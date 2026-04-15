@@ -3,7 +3,7 @@ import cors from "cors";
 import { writeFileSync } from "fs";
 
 const app = express();
-const PORT = 8787;
+const PORT = Number(process.env.PORT || 8787);
 
 app.use(cors());
 app.use(express.json());
@@ -36,15 +36,30 @@ const PWA_REGISTER_SCRIPT = `
 
 const PWA_NAV_STYLE = `
       <style>
+        .top-nav-shell {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          z-index: 1000;
+          background: rgba(248, 250, 252, 0.96);
+          backdrop-filter: blur(8px);
+          border-bottom: 1px solid #e2e8f0;
+          box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+        }
         .top-nav {
           display: flex;
           flex-wrap: wrap;
           gap: 10px;
           align-items: center;
           justify-content: flex-start;
+          max-width: 1080px;
+          margin: 0 auto;
           padding: 16px 0 18px;
+        }
+        .top-nav-spacer {
+          height: 84px;
           margin-bottom: 18px;
-          border-bottom: 1px solid #e2e8f0;
         }
         .nav-link {
           color: #0f172a;
@@ -70,10 +85,15 @@ const PWA_NAV_STYLE = `
           .top-nav {
             flex-direction: column;
             align-items: stretch;
+            padding-left: 16px;
+            padding-right: 16px;
           }
           .nav-link {
             width: 100%;
             justify-content: center;
+          }
+          .top-nav-spacer {
+            height: 172px;
           }
         }
       </style>
@@ -81,16 +101,19 @@ const PWA_NAV_STYLE = `
 
 function renderTopNav(links = []) {
   return `
-      <div class="top-nav">
-        ${links
-          .map(
-            (link) =>
-              `<a class="nav-link${link.active ? " is-active" : ""}" href="${escaparHtml(link.href)}" ${
-                link.active ? 'aria-current="page"' : ""
-              } ${link.attrs || ""}>${escaparHtml(link.label)}</a>`
-          )
-          .join("")}
+      <div class="top-nav-shell">
+        <div class="top-nav">
+          ${links
+            .map(
+              (link) =>
+                `<a class="nav-link${link.active ? " is-active" : ""}" href="${escaparHtml(link.href)}" ${
+                  link.active ? 'aria-current="page"' : ""
+                } ${link.attrs || ""}>${escaparHtml(link.label)}</a>`
+            )
+            .join("")}
+        </div>
       </div>
+      <div class="top-nav-spacer" aria-hidden="true"></div>
     `;
 }
 
@@ -111,12 +134,33 @@ function buildLectorHref(url, returnTo = "") {
   return buildPathWithParams("/lector", { url, returnTo });
 }
 
-function buildVerTextoHref({ url, origen = "", modo = "", returnTo = "" }) {
+function buildVerTextoHref({
+  url,
+  origen = "",
+  modo = "",
+  returnTo = "",
+  parte = "",
+  libro = "",
+  tituloIndice = "",
+  capitulo = "",
+  epigrafe = "",
+  rango = "",
+  nombre = "",
+  fuente = "",
+}) {
   return buildPathWithParams("/ver-texto", {
     url,
     origen,
     modo,
     returnTo,
+    parte,
+    libro,
+    tituloIndice,
+    capitulo,
+    epigrafe,
+    rango,
+    nombre,
+    fuente,
   });
 }
 
@@ -575,7 +619,7 @@ function normalizarEtiquetaIndice(texto = "") {
 
 function extraerIndiceTematico(html = "", urlBase = "") {
   const fuente = stripScriptsAndStyles(String(html || ""));
-  const idxIndice = fuente.search(/INDICE\s+TEMATICO/i);
+  const idxIndice = fuente.search(/[IÍ]NDICE\s+TEM[ÁA]TICO/i);
 
   if (idxIndice === -1) {
     return null;
@@ -633,7 +677,7 @@ function extraerIndiceTematico(html = "", urlBase = "") {
       const texto = token.text;
       const textoUpper = texto.toUpperCase();
 
-      if (/^INDICE\s+TEMATICO$/i.test(texto)) {
+      if (/^[IÍ]NDICE\s+TEM[ÁA]TICO$/i.test(texto)) {
         continue;
       }
 
@@ -744,6 +788,7 @@ function renderIndiceTematicoHtml({
   fichaHref = "",
   backLink = { href: "/", label: "Volver" },
   textoHref = "",
+  textoUrl = "",
   origenUrl = "",
 }) {
   const grupos = [];
@@ -773,6 +818,20 @@ function renderIndiceTematicoHtml({
         .map((item) => {
           const jerarquia = [item.titulo, item.capitulo].filter(Boolean).join(" · ");
           const fuenteBloque = item.enlaceOficial || (item.bloqueUrl ? `${item.bloqueUrl}${item.anchor ? `#${item.anchor}` : ""}` : "");
+          const textoDestinoUrl = indice.urlFuente || textoUrl || origenUrl;
+          const textoPosicionadoHref = buildPathWithParams("/ver-texto", {
+            url: textoDestinoUrl,
+            origen: origenUrl,
+            returnTo: textoHref,
+            parte: item.parte,
+            libro: item.libro,
+            tituloIndice: item.titulo,
+            capitulo: item.capitulo,
+            epigrafe: item.epigrafe,
+            rango: item.rangoArticulos,
+            nombre: indice.nombre,
+            fuente: fuenteBloque,
+          });
           const bloqueHref = fuenteBloque
             ? buildVerBloqueIndiceHref({
                 url: item.bloqueUrl,
@@ -789,8 +848,9 @@ function renderIndiceTematicoHtml({
                 fuente: fuenteBloque,
               })
             : "";
-          const enlacePrincipal = bloqueHref
-            ? `<a class="indice-link indice-link-primary" href="${escaparHtml(bloqueHref)}">Leer bloque</a>`
+          const enlacePrincipal = `<a class="indice-link indice-link-primary" href="${escaparHtml(textoPosicionadoHref)}">Ir al texto completo</a>`;
+          const enlaceFallback = bloqueHref
+            ? `<a class="indice-link" href="${escaparHtml(bloqueHref)}">Abrir bloque aislado</a>`
             : "";
           const enlaceSecundario = item.enlaceOficial
             ? `<a class="indice-link" href="${escaparHtml(item.enlaceOficial)}" target="_blank" rel="noopener">Abrir fuente oficial</a>`
@@ -803,6 +863,7 @@ function renderIndiceTematicoHtml({
               ${item.rangoArticulos ? `<div class="indice-rango">${escaparHtml(item.rangoArticulos)}</div>` : ""}
               <div class="indice-actions">
                 ${enlacePrincipal}
+                ${enlaceFallback}
                 ${enlaceSecundario}
               </div>
             </article>
@@ -1209,6 +1270,148 @@ function renderBloqueIndiceHtml({
     </body>
     </html>
   `;
+}
+
+function normalizarTextoClave(texto = "") {
+  return decodeHtmlEntities(String(texto || ""))
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function slugifyTexto(texto = "") {
+  return normalizarTextoClave(texto)
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function extraerPrimerArticuloDeRango(rango = "") {
+  const limpio = normalizarTextoClave(rango).replace(/\barts?\b/g, "articulo");
+  const match = limpio.match(/\b(\d{1,4})\b/);
+  return match ? match[1] : "";
+}
+
+function construirObjetivoIndiceDesdeQuery(query = {}) {
+  return {
+    parte: String(query.parte || "").trim(),
+    libro: String(query.libro || "").trim(),
+    titulo: String(query.tituloIndice || query.titulo || "").trim(),
+    capitulo: String(query.capitulo || "").trim(),
+    epigrafe: String(query.epigrafe || "").trim(),
+    rango: String(query.rango || "").trim(),
+    nombre: String(query.nombre || "").trim(),
+    fuente: String(query.fuente || "").trim(),
+  };
+}
+
+function tieneObjetivoIndice(objetivo = {}) {
+  return Boolean(
+    objetivo.parte ||
+      objetivo.libro ||
+      objetivo.titulo ||
+      objetivo.capitulo ||
+      objetivo.epigrafe ||
+      objetivo.rango
+  );
+}
+
+function obtenerRutaJerarquica(item = {}) {
+  return [item.parte, item.libro, item.titulo, item.capitulo]
+    .filter(Boolean)
+    .map((valor) => normalizarTextoClave(valor))
+    .filter(Boolean);
+}
+
+function coincidenJerarquias(candidata = [], objetivo = []) {
+  if (objetivo.length === 0) return true;
+  if (candidata.length < objetivo.length) return false;
+  return objetivo.every((segmento, index) => candidata[index] === segmento);
+}
+
+function resolverObjetivoIndiceEnBloques(bloques = [], objetivo = {}) {
+  if (!tieneObjetivoIndice(objetivo)) {
+    return null;
+  }
+
+  const jerarquiaObjetivo = obtenerRutaJerarquica(objetivo);
+  const tituloNormalizado = normalizarTextoClave(objetivo.titulo);
+  const capituloNormalizado = normalizarTextoClave(objetivo.capitulo);
+  const libroNormalizado = normalizarTextoClave(objetivo.libro);
+  const parteNormalizada = normalizarTextoClave(objetivo.parte);
+  const epigrafeNormalizado = normalizarTextoClave(objetivo.epigrafe);
+  const primerArticulo = extraerPrimerArticuloDeRango(objetivo.rango);
+
+  const coincidenciaDivision = (nivel, valorNormalizado) =>
+    bloques.find((bloque) => {
+      if (bloque.type !== "division" || bloque.level !== nivel) return false;
+      if (!valorNormalizado) return false;
+      return (
+        bloque.normalizedTitle === valorNormalizado ||
+        bloque.contextPath.includes(valorNormalizado)
+      );
+    });
+
+  if (capituloNormalizado) {
+    const match = coincidenciaDivision("capitulo", capituloNormalizado);
+    if (match) return match;
+  }
+
+  if (tituloNormalizado) {
+    const match = coincidenciaDivision("titulo", tituloNormalizado);
+    if (match) return match;
+  }
+
+  if (libroNormalizado) {
+    const match = coincidenciaDivision("libro", libroNormalizado);
+    if (match) return match;
+  }
+
+  if (parteNormalizada) {
+    const match = coincidenciaDivision("parte", parteNormalizada);
+    if (match) return match;
+  }
+
+  if (primerArticulo) {
+    const articulo = bloques.find((bloque) => {
+      if (bloque.type !== "article") return false;
+      if (String(bloque.articleNumber || "") !== primerArticulo) return false;
+      return coincidenJerarquias(bloque.contextPath || [], jerarquiaObjetivo);
+    });
+
+    if (articulo) {
+      return articulo;
+    }
+  }
+
+  if (epigrafeNormalizado) {
+    const porEpigrafe = bloques.find((bloque) => {
+      const contenido = normalizarTextoClave(`${bloque.title || ""} ${bloque.plainText || ""}`);
+      if (!contenido.includes(epigrafeNormalizado)) return false;
+      return coincidenJerarquias(bloque.contextPath || [], jerarquiaObjetivo);
+    });
+
+    if (porEpigrafe) {
+      return porEpigrafe;
+    }
+  }
+
+  const fallbackJerarquia = [...jerarquiaObjetivo].reverse().find(Boolean);
+  if (fallbackJerarquia) {
+    const match = bloques.find((bloque) => {
+      if (bloque.type !== "division") return false;
+      return bloque.contextPath.includes(fallbackJerarquia);
+    });
+
+    if (match) {
+      return match;
+    }
+  }
+
+  return null;
 }
 
 function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {}, returnTo = "", indiceTematico = null }) {
@@ -1722,6 +1925,103 @@ function limpiarBasuraResidual(texto = "") {
     .trim();
 }
 
+function normalizarTextoComparacion(texto = "") {
+  return String(texto)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function esTituloGeneralNorma(linea = "", tituloNorma = "") {
+  const lineaNorm = normalizarTextoComparacion(linea);
+  const tituloNorm = normalizarTextoComparacion(tituloNorma);
+
+  if (!lineaNorm || !tituloNorm) return false;
+  if (lineaNorm === tituloNorm) return true;
+
+  return (
+    lineaNorm.length >= 12 &&
+    tituloNorm.length >= 12 &&
+    (lineaNorm.includes(tituloNorm) || tituloNorm.includes(lineaNorm))
+  );
+}
+
+function esPosibleEncabezadoEstructural(linea = "") {
+  const limpio = String(linea || "").trim();
+  if (!limpio) return false;
+  if (limpio.length > 120) return false;
+
+  return /^(?:PARTE|LIBRO|T[IÍ]TULO|CAP[IÍ]TULO|SECCI[ÓO]N)\b/i.test(limpio);
+}
+
+function extraerDatosDivision(linea = "") {
+  const limpio = String(linea || "").trim().replace(/\s+/g, " ");
+  const match = limpio.match(
+    /^(PARTE|LIBRO|T[IÍ]TULO|CAP[IÍ]TULO|SECCI[ÓO]N)\s+(.+?)(?:\s*[-–—.:]\s*(.+))?$/i
+  );
+
+  if (!match) return null;
+
+  const tipo = match[1];
+  const identificador = String(match[2] || "").trim();
+  const detalle = String(match[3] || "").trim();
+
+  if (!identificador) return null;
+
+  return {
+    tipo,
+    identificador,
+    detalle,
+  };
+}
+
+function esLineaComplementariaDivision(linea = "") {
+  const limpio = String(linea || "").trim();
+  if (!limpio) return false;
+  if (limpio.length > 100) return false;
+  if (esPosibleEncabezadoEstructural(limpio)) return false;
+  if (/^(?:ART[ÍI]CULO|ARTICULO|ART\.?)\b/i.test(limpio)) return false;
+
+  return /^[A-ZÁÉÍÓÚÜÑ0-9][A-ZÁÉÍÓÚÜÑ0-9 ,;()/"'°º.-]*$/.test(limpio);
+}
+
+function buscarSiguienteLineaNoVacia(lines = [], startIndex = 0) {
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = String(lines[i] || "").trim();
+    if (line) {
+      return { line, index: i };
+    }
+  }
+
+  return { line: "", index: -1 };
+}
+
+function esEpigrafeIntermedio(linea = "", siguienteLinea = "") {
+  const limpio = String(linea || "").trim();
+  const siguiente = String(siguienteLinea || "").trim();
+
+  if (!limpio || !siguiente) return false;
+  if (limpio.length < 4 || limpio.length > 90) return false;
+  if (esPosibleEncabezadoEstructural(limpio)) return false;
+  if (/^(?:ART[ÍI]CULO|ARTICULO|ART\.?)\b/i.test(limpio)) return false;
+  if (!/^(?:ART[ÍI]CULO|ARTICULO|ART\.?)\b/i.test(siguiente)) return false;
+  if (/[.:;]$/.test(limpio)) return false;
+
+  const palabras = limpio.split(/\s+/).filter(Boolean);
+  if (palabras.length > 8) return false;
+
+  const letras = limpio.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g, "");
+  if (letras.length < 4) return false;
+
+  const mayusculas = (limpio.match(/[A-ZÁÉÍÓÚÜÑ]/g) || []).length;
+  const proporcionMayusculas = mayusculas / letras.length;
+
+  return proporcionMayusculas >= 0.75;
+}
+
 function extraerArticulos(texto = "") {
   const limpio = normalizarSaltos(String(texto));
   const lines = limpio.split("\n");
@@ -1992,7 +2292,7 @@ function extraerNorma(html) {
   };
 }
 
-function formatearTextoNormativo(texto = "") {
+function extraerBloquesNormativos(texto = "", tituloNorma = "") {
   const ordinalsAntes = [
     "PRIMERA",
     "SEGUNDA",
@@ -2036,11 +2336,8 @@ function formatearTextoNormativo(texto = "") {
     "XII",
   ];
 
-  const encabezadoDivision = new RegExp(
-    `^(?:(?:PARTE|LIBRO)\\s+(?:${ordinalsAntes.join("|")})|(?:T[IÍ]TULO|CAP[IÍ]TULO|SECCI[ÓO]N)\\s+(?:${ordinalsDespues.join("|" )}|${romanNumerals.join("|" )}))(?:\\s*[-–—.:]\\s*(.*))?$`,
-    "i"
-  );
   const encabezadoArticulo = /^(?:ART[ÍI]CULO|ARTICULO|ART\.?)(?:\s+)(\d{1,4}(?:[°º]?|bis|ter|quater|quinquies)?)(?:\s*[-–—.:]\s*(.*))?$/i;
+  const encabezadoEstructural = /^(?:PARTE|LIBRO|T[IÍ]TULO|CAP[IÍ]TULO|SECCI[ÓO]N)\b/i;
 
   const rawLines = normalizarSaltos(String(texto)).split(/\n/);
   const lines = rawLines.map((line) => line.trim());
@@ -2077,24 +2374,51 @@ function formatearTextoNormativo(texto = "") {
       .replace(/\bSEXTO\b/gi, "Sexto")
       .trim();
 
+  const detectarNivelDivision = (titulo = "") => {
+    if (/^parte\b/i.test(titulo)) return "parte";
+    if (/^libro\b/i.test(titulo)) return "libro";
+    if (/^t[íi]tulo\b/i.test(titulo)) return "titulo";
+    if (/^cap[íi]tulo\b/i.test(titulo)) return "capitulo";
+    if (/^secci[óo]n\b/i.test(titulo)) return "seccion";
+    return "division";
+  };
+
   for (let i = 0; i < rawLines.length; i++) {
     const rawLine = rawLines[i];
     const line = lines[i];
-    const divisionMatch = line.match(encabezadoDivision);
+    const siguienteNoVacia = buscarSiguienteLineaNoVacia(lines, i + 1);
+    const siguienteLinea = siguienteNoVacia.line || "";
+    const divisionData = extraerDatosDivision(line);
     const articuloMatch = line.match(encabezadoArticulo);
 
-    const puedeAbrir = !prevLine || !/\S/.test(prevLine) || /^(?:ART[ÍI]CULO|ARTICULO|ART\.?|T[IÍ]TULO|CAP[IÍ]TULO|SECCI[ÓO]N|PARTE)\b/i.test(String(prevLine).trim());
+    const puedeAbrir = !prevLine || !/\S/.test(prevLine) || encabezadoEstructural.test(String(prevLine).trim()) || /^(?:ART[ÍI]CULO|ARTICULO|ART\.?)\b/i.test(String(prevLine).trim());
 
-    if (divisionMatch && puedeAbrir) {
+    if (esTituloGeneralNorma(line, tituloNorma) && actual.type === "intro" && actual.lines.length === 0) {
+      prevLine = rawLine;
+      continue;
+    }
+
+    if (divisionData && puedeAbrir) {
       cerrarBloqueActual();
-      const tituloRaw = line.trim();
+      const resto = String(divisionData.detalle || "").trim();
+      const consumioSiguienteLinea =
+        Boolean(siguienteLinea) &&
+        esLineaComplementariaDivision(siguienteLinea) &&
+        !resto;
+      const tituloRaw = [line.trim(), consumioSiguienteLinea ? siguienteLinea : ""]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
       const titulo = normalizarTituloDivision(tituloRaw);
-      const resto = String(divisionMatch[1] || "").trim();
+
       actual = {
         type: "division",
         title: titulo,
         lines: resto ? [resto] : [],
       };
+      if (consumioSiguienteLinea) {
+        i += 1;
+      }
       prevLine = rawLine;
       continue;
     }
@@ -2112,6 +2436,17 @@ function formatearTextoNormativo(texto = "") {
       continue;
     }
 
+    if ((actual.type === "article" || actual.type === "division") && esEpigrafeIntermedio(line, siguienteLinea)) {
+      cerrarBloqueActual();
+      actual = {
+        type: "epigraph",
+        title: line,
+        lines: [],
+      };
+      prevLine = rawLine;
+      continue;
+    }
+
     if (!/\S/.test(rawLine)) {
       actual.lines.push("");
     } else {
@@ -2123,34 +2458,166 @@ function formatearTextoNormativo(texto = "") {
 
   cerrarBloqueActual();
 
+  const contexto = {
+    parte: "",
+    libro: "",
+    titulo: "",
+    capitulo: "",
+  };
+
+  const bloquesNormalizados = bloques.map((bloque, index) => {
+    const plainTextOriginal = String(bloque.lines.join("\n"))
+      .replace(/@@BOLD_(?:START|END)@@/g, "")
+      .trim();
+    const plainText =
+      bloque.type === "intro" && index === 0
+        ? plainTextOriginal
+            .split("\n")
+            .filter((linea) => !esTituloGeneralNorma(linea, tituloNorma))
+            .join("\n")
+            .trim()
+        : plainTextOriginal;
+    const contentHtml = escaparHtml(plainText).replace(/\n/g, "<br>");
+
+    if (bloque.type === "division") {
+      const level = detectarNivelDivision(bloque.title);
+      const normalizedTitle = normalizarTextoClave(bloque.title);
+
+      if (level === "parte") {
+        contexto.parte = bloque.title;
+        contexto.libro = "";
+        contexto.titulo = "";
+        contexto.capitulo = "";
+      } else if (level === "libro") {
+        contexto.libro = bloque.title;
+        contexto.titulo = "";
+        contexto.capitulo = "";
+      } else if (level === "titulo") {
+        contexto.titulo = bloque.title;
+        contexto.capitulo = "";
+      } else if (level === "capitulo") {
+        contexto.capitulo = bloque.title;
+      } else if (level === "seccion") {
+        contexto.capitulo = bloque.title;
+      }
+
+      const contextPath = obtenerRutaJerarquica(contexto);
+      const id = `bloque-${level}-${slugifyTexto(bloque.title) || index + 1}`;
+
+      return {
+        type: "division",
+        level,
+        title: bloque.title,
+        normalizedTitle,
+        plainText,
+        contentHtml,
+        id,
+        contextPath,
+      };
+    }
+
+    if (bloque.type === "article") {
+      const articleNumber = String(
+        (bloque.title.match(/\d{1,4}/) || [])[0] || ""
+      ).trim();
+
+      return {
+        type: "article",
+        title: bloque.title,
+        plainText,
+        contentHtml,
+        id: `articulo-${articleNumber || index + 1}`,
+        articleNumber,
+        contextPath: obtenerRutaJerarquica(contexto),
+      };
+    }
+
+    if (bloque.type === "epigraph") {
+      return {
+        type: "epigraph",
+        title: bloque.title,
+        plainText,
+        contentHtml,
+        id: `epigrafe-${slugifyTexto(bloque.title) || index + 1}`,
+        contextPath: obtenerRutaJerarquica(contexto),
+      };
+    }
+
+    return {
+      type: index === 0 ? "intro" : "paragraph",
+      title: "",
+      plainText,
+      contentHtml,
+      id: index === 0 ? "texto-intro" : `parrafo-${index + 1}`,
+      contextPath: obtenerRutaJerarquica(contexto),
+    };
+  });
+
+  const bloquesFusionados = [];
+
+  for (const bloque of bloquesNormalizados) {
+    const anterior = bloquesFusionados[bloquesFusionados.length - 1];
+
+    if (
+      bloque.type === "article" &&
+      anterior?.type === "epigraph" &&
+      coincidenJerarquias(bloque.contextPath || [], anterior.contextPath || [])
+    ) {
+      bloquesFusionados[bloquesFusionados.length - 1] = {
+        ...bloque,
+        subtitle: anterior.title,
+      };
+      continue;
+    }
+
+    bloquesFusionados.push(bloque);
+  }
+
+  return bloquesFusionados;
+}
+
+function renderBloquesNormativosHtml(bloques = [], objetivo = null) {
+  const objetivoId = objetivo?.id || "";
+
   return bloques
-    .map((bloque, index) => {
-      const contenido = String(bloque.lines.join("\n")).replace(/@@BOLD_(?:START|END)@@/g, "").trim();
-      const contenidoHtml = escaparHtml(contenido).replace(/\n/g, "<br>");
+    .map((bloque) => {
+      const esObjetivo = objetivoId && bloque.id === objetivoId;
+      const attrsObjetivo = esObjetivo
+        ? ' data-target-match="true" tabindex="-1"'
+        : "";
 
       if (bloque.type === "division") {
         return `
-          <div class="bloque bloque-division">
+          <section id="${escaparHtml(bloque.id)}" class="bloque bloque-division"${attrsObjetivo}>
             <div class="division-titulo">${escaparHtml(bloque.title)}</div>
-            ${contenido ? `<div class="division-contenido">${contenidoHtml}</div>` : ""}
-          </div>
+            ${bloque.plainText ? `<div class="division-contenido">${bloque.contentHtml}</div>` : ""}
+          </section>
         `;
       }
 
       if (bloque.type === "article") {
         return `
-          <div class="bloque bloque-articulo">
+          <section id="${escaparHtml(bloque.id)}" class="bloque bloque-articulo"${attrsObjetivo}>
             <div class="articulo-titulo">${escaparHtml(bloque.title)}</div>
-            <div class="articulo-texto">${contenidoHtml}</div>
-          </div>
+            ${bloque.subtitle ? `<div class="articulo-subtitulo">${escaparHtml(bloque.subtitle)}</div>` : ""}
+            <div class="articulo-texto">${bloque.contentHtml}</div>
+          </section>
         `;
       }
 
-      const clase = index === 0 ? "bloque bloque-intro" : "bloque bloque-parrafo";
+      if (bloque.type === "epigraph") {
+        return `
+          <section id="${escaparHtml(bloque.id)}" class="bloque bloque-epigrafe"${attrsObjetivo}>
+            <div class="epigrafe-titulo">${escaparHtml(bloque.title)}</div>
+          </section>
+        `;
+      }
+
+      const clase = bloque.type === "intro" ? "bloque bloque-intro" : "bloque bloque-parrafo";
       return `
-        <div class="${clase}">
-          ${contenidoHtml}
-        </div>
+        <section id="${escaparHtml(bloque.id)}" class="${clase}"${attrsObjetivo}>
+          ${bloque.contentHtml}
+        </section>
       `;
     })
     .join("");
@@ -2769,6 +3236,7 @@ app.get("/ver-texto", async (req, res) => {
     const origen = String(req.query.origen || "").trim();
     const modo = String(req.query.modo || "").trim();
     const returnTo = String(req.query.returnTo || "").trim();
+    const objetivoIndice = construirObjetivoIndiceDesdeQuery(req.query);
     const fichaHref = buildLectorHref(origen || url, returnTo);
     const backLink = getContextualBackLink(returnTo, fichaHref);
 
@@ -2794,19 +3262,56 @@ app.get("/ver-texto", async (req, res) => {
     const indiceTematico = extraerIndiceTematico(html, url);
     const textoHref = buildVerTextoHref({ url, origen, modo, returnTo });
 
-    if (indiceTematico) {
+    if (indiceTematico && !tieneObjetivoIndice(objetivoIndice)) {
       return res.send(
         renderIndiceTematicoHtml({
           indice: indiceTematico,
           fichaHref,
           backLink,
           textoHref,
+          textoUrl: url,
           origenUrl: origen || url,
         })
       );
     }
 
-    const textoHtml = formatearTextoNormativo(norma.textoPlano).replace(/@@BOLD_(?:START|END)@@/g, "");
+    const bloquesNormativos = extraerBloquesNormativos(norma.textoPlano, norma.titulo);
+    const objetivoResuelto = resolverObjetivoIndiceEnBloques(bloquesNormativos, objetivoIndice);
+    const textoHtml = renderBloquesNormativosHtml(bloquesNormativos, objetivoResuelto);
+    const pistaObjetivo = [objetivoIndice.capitulo, objetivoIndice.titulo, objetivoIndice.libro, objetivoIndice.parte, objetivoIndice.rango]
+      .filter(Boolean)
+      .join(" · ");
+    const fallbackBloqueHref = objetivoResuelto || !tieneObjetivoIndice(objetivoIndice)
+      ? ""
+      : buildVerBloqueIndiceHref({
+          url,
+          origen,
+          returnTo: textoHref,
+          nombre: objetivoIndice.nombre || norma.titulo,
+          parte: objetivoIndice.parte,
+          libro: objetivoIndice.libro,
+          titulo: objetivoIndice.titulo,
+          capitulo: objetivoIndice.capitulo,
+          epigrafe: objetivoIndice.epigrafe,
+          rango: objetivoIndice.rango,
+          fuente: objetivoIndice.fuente,
+        });
+    const scriptPosicionamiento = objetivoResuelto
+      ? `
+        <script>
+          window.addEventListener('load', () => {
+            const target = document.getElementById(${JSON.stringify(objetivoResuelto.id)});
+            if (!target) return;
+            target.classList.add('bloque-destacado');
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            window.setTimeout(() => target.classList.remove('bloque-destacado'), 2600);
+            if (typeof history.replaceState === 'function') {
+              history.replaceState(null, '', '#' + target.id);
+            }
+          });
+        </script>
+      `
+      : "";
 
     const htmlRender = `
       <!doctype html>
@@ -2844,11 +3349,25 @@ app.get("/ver-texto", async (req, res) => {
             display: grid;
             gap: 20px;
           }
+          .contexto-destino {
+            margin: 0 0 20px;
+            padding: 16px 18px;
+            border-radius: 14px;
+            background: #e0f2fe;
+            border: 1px solid #7dd3fc;
+            color: #0f172a;
+          }
+          .contexto-destino strong {
+            display: block;
+            margin-bottom: 4px;
+          }
           .bloque {
             border-radius: 14px;
             padding: 18px;
             background: white;
             box-shadow: 0 1px 12px rgba(15,23,42,0.06);
+            scroll-margin-top: 92px;
+            transition: box-shadow 0.3s ease, border-color 0.3s ease, background 0.3s ease;
           }
           .bloque-intro {
             border: 1px solid #cbd5e1;
@@ -2879,10 +3398,34 @@ app.get("/ver-texto", async (req, res) => {
             border: 1px solid #e2e8f0;
             padding: 18px;
           }
+          .bloque-epigrafe {
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            padding: 14px 18px;
+          }
+          .bloque-destacado {
+            border-color: #0284c7;
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18), 0 8px 24px rgba(14, 165, 233, 0.16);
+            background: #f0f9ff;
+          }
           .articulo-titulo {
             font-weight: 700;
             margin-bottom: 12px;
             color: #0f172a;
+          }
+          .articulo-subtitulo {
+            margin: -2px 0 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #334155;
+          }
+          .epigrafe-titulo {
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #334155;
+            text-align: center;
           }
           .navegacion {
             text-align: center;
@@ -2929,7 +3472,16 @@ app.get("/ver-texto", async (req, res) => {
           { href: textoHref, label: 'Texto', active: true },
         ])}
         <h1 class="titulo">${escaparHtml(norma.titulo)}</h1>
+        ${tieneObjetivoIndice(objetivoIndice) ? `
+          <section class="contexto-destino">
+            <strong>${objetivoResuelto ? "Ubicado desde el índice temático" : "No se pudo ubicar el tramo exacto"}</strong>
+            <div>${escaparHtml(pistaObjetivo || objetivoIndice.epigrafe || "Entrada del índice")}</div>
+            ${objetivoIndice.epigrafe ? `<div>${escaparHtml(objetivoIndice.epigrafe)}</div>` : ""}
+            ${!objetivoResuelto && fallbackBloqueHref ? `<div style="margin-top:10px;"><a href="${escaparHtml(fallbackBloqueHref)}">Abrir bloque aislado como fallback</a></div>` : ""}
+          </section>
+        ` : ""}
         <div class="contenido">${textoHtml}</div>
+${scriptPosicionamiento}
 ${PWA_REGISTER_SCRIPT}
     </body>
       </html>

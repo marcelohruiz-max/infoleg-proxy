@@ -62,6 +62,9 @@ const PWA_NAV_STYLE = `
           margin-bottom: 18px;
         }
         .nav-link {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
           color: #0f172a;
           background: #ffffff;
           border: 1px solid #cbd5e1;
@@ -69,6 +72,8 @@ const PWA_NAV_STYLE = `
           border-radius: 12px;
           text-decoration: none;
           font-size: 0.95rem;
+          line-height: 1.2;
+          white-space: nowrap;
           transition: background 0.2s ease, border-color 0.2s ease;
         }
         .nav-link:hover {
@@ -82,18 +87,11 @@ const PWA_NAV_STYLE = `
           font-weight: 600;
         }
         @media (max-width: 768px) {
-          .top-nav {
-            flex-direction: column;
-            align-items: stretch;
-            padding-left: 16px;
-            padding-right: 16px;
-          }
-          .nav-link {
-            width: 100%;
-            justify-content: center;
+          .top-nav-shell {
+            display: none;
           }
           .top-nav-spacer {
-            height: 172px;
+            display: none;
           }
         }
       </style>

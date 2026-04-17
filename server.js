@@ -3,7 +3,7 @@ import cors from "cors";
 import { writeFileSync } from "fs";
 
 const app = express();
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 3000);
 
 app.use(cors());
 app.use(express.json());
@@ -2968,7 +2968,7 @@ function renderBuscadorHtml({
 
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true });
+  res.status(200).json({ ok: true });
 });
 
 app.get("/", async (req, res) => {
@@ -3523,6 +3523,6 @@ app.get("/debug-links", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Servidor corriendo en 0.0.0.0:${PORT}`);
 });

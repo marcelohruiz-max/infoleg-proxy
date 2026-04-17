@@ -3,10 +3,16 @@ import cors from "cors";
 import { writeFileSync } from "fs";
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+const PORT = process.env.PORT || 3000;
+const HOST = "0.0.0.0";
 
 app.use(cors());
 app.use(express.json());
+
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 app.use(express.static("public"));
 
 const HEADERS = {
@@ -2965,12 +2971,6 @@ function renderBuscadorHtml({
     </html>
   `;
 }
-
-
-app.get("/health", (_req, res) => {
-  res.status(200).json({ ok: true });
-});
-
 app.get("/", async (req, res) => {
   try {
     const q = String(req.query.q || "").trim();
@@ -3523,6 +3523,6 @@ app.get("/debug-links", async (req, res) => {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor corriendo en 0.0.0.0:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`Servidor corriendo en ${HOST}:${PORT}`);
 });

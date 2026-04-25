@@ -40,6 +40,83 @@ const PWA_REGISTER_SCRIPT = `
       </script>
     `;
 
+const SHARE_ACTIONS_SCRIPT = `
+      <script>
+        (() => {
+          const shareButtons = document.querySelectorAll('[data-share-link]');
+          const copyButtons = document.querySelectorAll('[data-copy-link]');
+          const statusNodes = document.querySelectorAll('[data-share-status]');
+
+          const setStatus = (message = '') => {
+            statusNodes.forEach((node) => {
+              node.textContent = message;
+            });
+            if (message) {
+              window.setTimeout(() => setStatus(''), 1800);
+            }
+          };
+
+          const copyText = async (text) => {
+            if (navigator.clipboard && window.isSecureContext) {
+              await navigator.clipboard.writeText(text);
+              return;
+            }
+
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            textarea.remove();
+          };
+
+          const shareUrl = () => {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('returnTo');
+            return url.href;
+          };
+
+          const payload = () => ({
+            title: document.title.replace(/\\s+\\|\\s+.*$/, ''),
+            url: shareUrl(),
+          });
+
+          if (!navigator.share) {
+            shareButtons.forEach((button) => {
+              button.hidden = true;
+            });
+          }
+
+          shareButtons.forEach((button) => {
+            button.addEventListener('click', async () => {
+              try {
+                await navigator.share(payload());
+              } catch (error) {
+                if (!error || error.name !== 'AbortError') {
+                  await copyText(shareUrl());
+                  setStatus('Enlace copiado');
+                }
+              }
+            });
+          });
+
+          copyButtons.forEach((button) => {
+            button.addEventListener('click', async () => {
+              try {
+                await copyText(shareUrl());
+                setStatus('Enlace copiado');
+              } catch (_error) {
+                setStatus('No se pudo copiar');
+              }
+            });
+          });
+        })();
+      </script>
+    `;
+
 const PWA_NAV_STYLE = `
       <style>
         .top-nav-shell {
@@ -117,6 +194,37 @@ const PWA_NAV_STYLE = `
           color: #0f172a;
           font-weight: 600;
         }
+        .share-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          align-items: center;
+          margin: 14px 0 0;
+        }
+        .share-actions button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 38px;
+          border: 1px solid #cbd5e1;
+          border-radius: 10px;
+          padding: 9px 13px;
+          background: #ffffff;
+          color: #0f172a;
+          font: inherit;
+          font-size: 0.92rem;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .share-actions button:hover {
+          background: #f8fafc;
+          border-color: #94a3b8;
+        }
+        .share-status {
+          min-height: 1.2em;
+          color: #475569;
+          font-size: 0.88rem;
+        }
         @media (max-width: 768px) {
           .top-nav-shell {
             display: none;
@@ -127,6 +235,13 @@ const PWA_NAV_STYLE = `
           .breadcrumbs {
             margin-top: 2px;
             font-size: 0.86rem;
+          }
+          .share-actions {
+            align-items: stretch;
+          }
+          .share-actions button {
+            flex: 1 1 130px;
+            min-height: 42px;
           }
         }
       </style>
@@ -293,6 +408,16 @@ function obtenerLabelOrigen(returnTo = "") {
   }
 
   return String(returnTo).startsWith("/resultados") ? "Resultados" : "Volver";
+}
+
+function renderShareActions() {
+  return `
+      <div class="share-actions" aria-label="Acciones para compartir">
+        <button type="button" data-share-link>Compartir</button>
+        <button type="button" data-copy-link>Copiar enlace</button>
+        <span class="share-status" data-share-status role="status" aria-live="polite"></span>
+      </div>
+    `;
 }
 
 function decodeHtmlEntities(text = "") {
@@ -1119,10 +1244,12 @@ function renderIndiceTematicoHtml({
           <a class="primary" href="${escaparHtml(indice.urlFuente)}" target="_blank" rel="noopener">Abrir fuente oficial</a>
           <a class="secondary" href="${escaparHtml(fichaHref)}">Volver a la ficha</a>
         </div>
+        ${renderShareActions()}
       </section>
       <main class="contenido">
         ${gruposHtml}
       </main>
+      ${SHARE_ACTIONS_SCRIPT}
       ${PWA_REGISTER_SCRIPT}
     </body>
     </html>
@@ -1681,12 +1808,14 @@ function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {}, returnTo =
             })
           )}">Ver texto completo</a>`}
         </div>
+        ${renderShareActions()}
       </div>
 
       <div class="card">
         <h2>Encabezado</h2>
         <pre>${escaparHtml(norma.encabezado || "")}</pre>
       </div>
+      ${SHARE_ACTIONS_SCRIPT}
       ${PWA_REGISTER_SCRIPT}
     </body>
     </html>
@@ -3769,6 +3898,7 @@ app.get("/ver-texto", async (req, res) => {
         ])}
         ${breadcrumbs}
         <h1 class="titulo">${escaparHtml(norma.titulo)}</h1>
+        ${renderShareActions()}
         <div class="lector-actions" aria-label="Herramientas del lector">
           <button class="lector-icon-button" type="button" data-open-search aria-label="Buscar en el texto" title="Buscar en el texto">
             <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -3934,6 +4064,7 @@ ${scriptPosicionamiento}
             window.addEventListener('scroll', () => menu.classList.remove('is-open'), { passive: true });
           })();
         </script>
+${SHARE_ACTIONS_SCRIPT}
 ${PWA_REGISTER_SCRIPT}
     </body>
       </html>

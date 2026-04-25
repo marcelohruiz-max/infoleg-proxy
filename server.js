@@ -2738,14 +2738,17 @@ function renderBuscadorHtml({
         .map(
           (r) => `
           <div class="resultado">
-  <div class="titulo">${escaparHtml(r.titulo)}</div>
-  <div class="meta">
-    <span>${escaparHtml(r.tipo || "-")}</span>
-    <span>${escaparHtml(r.numero || "-")}</span>
+  <div class="resultado-main">
+    <div class="titulo">${escaparHtml(r.titulo)}</div>
+    <div class="meta">
+      <span><strong>Tipo</strong>${escaparHtml(r.tipo || "-")}</span>
+      <span><strong>Número</strong>${escaparHtml(r.numero || "-")}</span>
+      <span><strong>Fecha</strong>${escaparHtml(r.fecha || "-")}</span>
+    </div>
+    <div class="url">${escaparHtml(r.url)}</div>
   </div>
-  <div class="url">${escaparHtml(r.url)}</div>
   <div class="acciones">
-    <a class="boton-texto" href="${escaparHtml(buildLectorHref(r.url, currentPath))}">Ver ficha</a>
+    <a class="boton-texto" href="${escaparHtml(buildLectorHref(r.url, currentPath))}">Abrir ficha</a>
   </div>
 </div>
           `
@@ -2855,35 +2858,53 @@ function renderBuscadorHtml({
           opacity: 0.94;
         }
         .resultado {
-          display: block;
+          display: grid;
+          grid-template-columns: 1fr auto;
+          gap: 18px;
+          align-items: center;
           text-decoration: none;
-          color: black;
+          color: #0f172a;
           background: white;
-          padding: 18px;
-          margin-bottom: 12px;
+          padding: 18px 20px;
+          margin-bottom: 14px;
           border-radius: 14px;
-          box-shadow: 0 1px 12px rgba(15, 23, 42, 0.06);
+          border: 1px solid #e2e8f0;
+          box-shadow: 0 1px 10px rgba(15, 23, 42, 0.04);
         }
         .resultado:hover {
-          outline: 1px solid #94a3b8;
+          border-color: #94a3b8;
+          box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
+        }
+        .resultado-main {
+          min-width: 0;
         }
         .titulo {
           font-weight: 700;
-          margin-bottom: 6px;
-          font-size: 1rem;
+          margin-bottom: 10px;
+          font-size: 1.06rem;
+          line-height: 1.35;
+          color: #0f172a;
         }
         .meta {
           display: flex;
           flex-wrap: wrap;
-          gap: 10px;
-          margin: 8px 0;
-          font-size: 12px;
+          gap: 8px;
+          margin: 8px 0 10px;
+          font-size: 0.78rem;
           color: #475569;
         }
         .meta span {
-          background: #e2e8e0;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: #f1f5f9;
+          border: 1px solid #e2e8f0;
           border-radius: 999px;
-          padding: 4px 10px;
+          padding: 5px 10px;
+        }
+        .meta strong {
+          color: #0f172a;
+          font-weight: 700;
         }
         .url {
           font-size: 12px;
@@ -2898,16 +2919,21 @@ function renderBuscadorHtml({
           color: #475569;
         }
         .acciones {
-          margin-top: 12px;
+          display: flex;
+          justify-content: flex-end;
         }
         .boton-texto {
-          display: inline-block;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
           text-decoration: none;
           background: #0f172a;
           color: white;
-          padding: 12px 16px;
+          padding: 12px 18px;
           border-radius: 10px;
           font-size: 14px;
+          font-weight: 700;
+          white-space: nowrap;
         }
         .boton-texto:hover {
           opacity: .92;
@@ -2980,9 +3006,15 @@ function renderBuscadorHtml({
             font-size: 16px; /* Evitar zoom en iOS */
           }
           .resultado {
+            grid-template-columns: 1fr;
+            gap: 14px;
             padding: 16px;
           }
+          .acciones {
+            justify-content: stretch;
+          }
           .boton-texto {
+            width: 100%;
             padding: 14px 18px;
             font-size: 16px;
           }

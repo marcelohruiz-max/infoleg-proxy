@@ -2633,7 +2633,12 @@ function renderBuscadorHtml({
   anio = "",
   resultados = [],
   currentPath = "/",
+  mostrarFormulario = true,
 } = {}) {
+  const hayBusqueda = Boolean(q || tipo || numero || anio);
+  const resumenBusqueda = tipo && numero
+    ? [tipo, numero, anio].filter(Boolean).join(" ")
+    : q;
   const items = resultados.length
     ? resultados
         .map(
@@ -2652,7 +2657,7 @@ function renderBuscadorHtml({
           `
         )
         .join("")
-    : (q || tipo || numero || anio)
+    : hayBusqueda
     ? `<div class="vacio">No se encontraron resultados con ese criterio de búsqueda.</div>`
     : "";
 
@@ -2662,7 +2667,7 @@ function renderBuscadorHtml({
     <head>
       <meta charset="utf-8" />
       ${PWA_META}
-      <title>Buscador Normativo</title>
+      <title>${mostrarFormulario ? "Buscador Normativo" : "Resultados de búsqueda"} | InfoLEG</title>
       ${PWA_NAV_STYLE}
       <style>
         body {
@@ -2892,10 +2897,12 @@ function renderBuscadorHtml({
     </head>
     <body>
       ${renderTopNav([
-        { href: '/', label: 'Inicio', active: true },
+        { href: '/', label: 'Inicio', active: mostrarFormulario },
+        ...(!mostrarFormulario ? [{ href: currentPath, label: 'Resultados', active: true }] : []),
         { href: '/constituciones', label: 'Constituciones' },
         { href: '/codigos', label: 'Códigos' },
       ])}
+      ${mostrarFormulario ? `
       <div class="card page-hero">
         <h1>Buscador Normativo</h1>
         <p class="sub">Consulte el repositorio normativo oficial de InfoLEG.</p>
@@ -2919,7 +2926,7 @@ function renderBuscadorHtml({
 
       <div class="card">
         <h2>Buscar norma por tipo y número</h2>
-        <form method="GET" action="/">
+        <form method="GET" action="/resultados">
           <div class="fila">
             <select name="tipo">
               <option value="">Tipo de norma</option>
@@ -2952,7 +2959,7 @@ function renderBuscadorHtml({
 
       <div class="card">
         <h2>Buscar por texto libre</h2>
-        <form method="GET" action="/">
+        <form method="GET" action="/resultados">
           <div class="fila-simple">
             <input
               type="text"
@@ -2964,6 +2971,15 @@ function renderBuscadorHtml({
           </div>
         </form>
       </div>
+      ` : `
+      <div class="card page-hero">
+        <h1>Resultados de búsqueda</h1>
+        <p class="sub">${resumenBusqueda ? `Consulta: ${escaparHtml(resumenBusqueda)}` : "Realice una búsqueda desde la portada."}</p>
+        <div class="acciones">
+          <a class="boton-texto" href="/">Nueva búsqueda</a>
+        </div>
+      </div>
+      `}
 
       ${items}
       ${PWA_REGISTER_SCRIPT}
@@ -2971,52 +2987,76 @@ function renderBuscadorHtml({
     </html>
   `;
 }
+
+async function buscarNormasInfoleg({ q = "", tipo = "", numero = "", anio = "" } = {}) {
+  let html = "";
+  let resultados = [];
+
+  if (tipo && numero) {
+    const urlNorma = construirUrlBusquedaNorma(tipo, numero, anio);
+
+    if (urlNorma) {
+      html = await fetchHTML(urlNorma);
+      resultados = extraerResultados(html);
+      return filtrarBusquedaNorma(resultados, tipo, numero);
+    }
+
+    const consulta = [tipo, numero, anio].filter(Boolean).join(" ");
+    const url = `https://www.infoleg.gob.ar/?buscar=${encodeURIComponent(consulta)}`;
+    html = await fetchHTML(url);
+    resultados = extraerResultados(html);
+    return filtrarBusquedaNorma(resultados, tipo, numero);
+  }
+
+  if (q) {
+    const url = `https://www.infoleg.gob.ar/?buscar=${encodeURIComponent(q)}`;
+    html = await fetchHTML(url);
+    return extraerResultados(html);
+  }
+
+  return [];
+}
+
 app.get("/", async (req, res) => {
   try {
     const q = String(req.query.q || "").trim();
     const tipo = String(req.query.tipo || "").trim();
     const numero = String(req.query.numero || "").trim();
     const anio = String(req.query.anio || "").trim();
-    const currentPath = req.originalUrl || "/";
 
-    if (!q && !tipo && !numero && !anio) {
-      return res.send(renderBuscadorHtml({ currentPath }));
+    if (q || tipo || numero || anio) {
+      return res.redirect(302, buildPathWithParams("/resultados", { q, tipo, numero, anio }));
     }
 
-    let html = "";
-    let resultados = [];
+    res.send(renderBuscadorHtml({ currentPath: "/" }));
+  } catch (e) {
+    res.status(500).send(`
+      <h1>Error</h1>
+      <pre>${escaparHtml(e.message)}</pre>
+    `);
+  }
+});
 
-    if (tipo && numero) {
-      const urlNorma = construirUrlBusquedaNorma(tipo, numero, anio);
+app.get("/resultados", async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    const tipo = String(req.query.tipo || "").trim();
+    const numero = String(req.query.numero || "").trim();
+    const anio = String(req.query.anio || "").trim();
+    const currentPath = req.originalUrl || "/resultados";
+    const resultados = await buscarNormasInfoleg({ q, tipo, numero, anio });
 
-      if (urlNorma) {
-        html = await fetchHTML(urlNorma);
-        resultados = extraerResultados(html);
-        resultados = filtrarBusquedaNorma(resultados, tipo, numero);
-      } else {
-        const consulta = [tipo, numero, anio].filter(Boolean).join(" ");
-        const url = `https://www.infoleg.gob.ar/?buscar=${encodeURIComponent(consulta)}`;
-        html = await fetchHTML(url);
-        resultados = extraerResultados(html);
-        resultados = filtrarBusquedaNorma(resultados, tipo, numero);
-      }
-    } else {
-      const url = `https://www.infoleg.gob.ar/?buscar=${encodeURIComponent(q)}`;
-      html = await fetchHTML(url);
-      resultados = extraerResultados(html);
-    }
-
-       
     res.send(
       renderBuscadorHtml({
-      q,
-      tipo,
-      numero,
-      anio,
-      resultados,
-      currentPath,
-    })
-  );
+        q,
+        tipo,
+        numero,
+        anio,
+        resultados,
+        currentPath,
+        mostrarFormulario: false,
+      })
+    );
   } catch (e) {
     res.status(500).send(`
       <h1>Error</h1>
@@ -3440,6 +3480,116 @@ app.get("/ver-texto", async (req, res) => {
           .navegacion a:hover {
             opacity: 0.92;
           }
+          .lector-actions {
+            position: sticky;
+            top: 88px;
+            z-index: 20;
+            display: flex;
+            justify-content: flex-end;
+            margin: -8px 0 12px;
+            pointer-events: none;
+          }
+          .lector-icon-button {
+            width: 42px;
+            height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #cbd5e1;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.94);
+            color: #0f172a;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+            cursor: pointer;
+            pointer-events: auto;
+          }
+          .lector-icon-button:hover {
+            background: #f8fafc;
+            border-color: #94a3b8;
+          }
+          .lector-search {
+            position: sticky;
+            top: 88px;
+            z-index: 30;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin: 0 0 16px;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.98);
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+          }
+          .lector-search.is-open {
+            display: flex;
+          }
+          .lector-search input {
+            min-width: 0;
+            flex: 1;
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            color: #0f172a;
+            background: #f8fafc;
+            font-size: 15px;
+          }
+          .lector-search-count {
+            min-width: 54px;
+            color: #475569;
+            font-size: 13px;
+            text-align: center;
+            white-space: nowrap;
+          }
+          .lector-search button,
+          .lector-menu button {
+            border: 0;
+            border-radius: 10px;
+            background: #0f172a;
+            color: #ffffff;
+            cursor: pointer;
+            font-weight: 600;
+          }
+          .lector-search button {
+            min-width: 36px;
+            height: 36px;
+            padding: 0 10px;
+            font-size: 14px;
+          }
+          .lector-search button.secondary {
+            background: #e2e8f0;
+            color: #0f172a;
+          }
+          .lector-hit {
+            background: #fde68a;
+            color: inherit;
+            border-radius: 3px;
+            padding: 0 1px;
+          }
+          .lector-hit.is-active {
+            background: #f97316;
+            color: #111827;
+            box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.24);
+          }
+          .lector-menu {
+            position: fixed;
+            z-index: 60;
+            display: none;
+            padding: 6px;
+            border: 1px solid #cbd5e1;
+            border-radius: 12px;
+            background: #ffffff;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+          }
+          .lector-menu.is-open {
+            display: block;
+          }
+          .lector-menu button {
+            display: block;
+            padding: 10px 12px;
+            font-size: 14px;
+            white-space: nowrap;
+          }
         </style>
         <style>
           @media (max-width: 768px) {
@@ -3457,6 +3607,20 @@ app.get("/ver-texto", async (req, res) => {
               padding: 14px 18px;
               font-size: 15px;
             }
+            .lector-actions,
+            .lector-search {
+              top: 10px;
+            }
+            .lector-search {
+              gap: 6px;
+              padding: 8px;
+            }
+            .lector-search input {
+              font-size: 16px;
+            }
+            .lector-search-count {
+              min-width: 46px;
+            }
           }
         </style>
       </head>
@@ -3470,6 +3634,24 @@ app.get("/ver-texto", async (req, res) => {
           { href: textoHref, label: 'Texto', active: true },
         ])}
         <h1 class="titulo">${escaparHtml(norma.titulo)}</h1>
+        <div class="lector-actions" aria-label="Herramientas del lector">
+          <button class="lector-icon-button" type="button" data-open-search aria-label="Buscar en el texto" title="Buscar en el texto">
+            <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="m21 21-4.3-4.3"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="lector-search" data-reader-search role="search" aria-label="Buscar dentro del documento">
+          <input type="search" data-reader-search-input placeholder="Buscar en el texto" autocomplete="off" />
+          <span class="lector-search-count" data-reader-search-count>0/0</span>
+          <button type="button" class="secondary" data-reader-search-prev aria-label="Coincidencia anterior">↑</button>
+          <button type="button" class="secondary" data-reader-search-next aria-label="Coincidencia siguiente">↓</button>
+          <button type="button" data-reader-search-close aria-label="Cerrar búsqueda">×</button>
+        </div>
+        <div class="lector-menu" data-reader-menu>
+          <button type="button" data-open-search>Buscar en el texto</button>
+        </div>
         ${tieneObjetivoIndice(objetivoIndice) ? `
           <section class="contexto-destino">
             <strong>${objetivoResuelto ? "Ubicado desde el índice temático" : "No se pudo ubicar el tramo exacto"}</strong>
@@ -3480,6 +3662,143 @@ app.get("/ver-texto", async (req, res) => {
         ` : ""}
         <div class="contenido">${textoHtml}</div>
 ${scriptPosicionamiento}
+        <script>
+          (() => {
+            const content = document.querySelector('.contenido');
+            const searchBar = document.querySelector('[data-reader-search]');
+            const searchInput = document.querySelector('[data-reader-search-input]');
+            const searchCount = document.querySelector('[data-reader-search-count]');
+            const menu = document.querySelector('[data-reader-menu]');
+            if (!content || !searchBar || !searchInput || !searchCount || !menu) return;
+
+            const originalHtml = content.innerHTML;
+            let hits = [];
+            let activeIndex = -1;
+            let pressTimer = null;
+            let suppressClickUntil = 0;
+
+            const escapeRegExp = (value) => value.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&');
+
+            const updateCount = () => {
+              searchCount.textContent = hits.length ? (activeIndex + 1) + '/' + hits.length : '0/0';
+            };
+
+            const setActive = (index) => {
+              if (!hits.length) {
+                activeIndex = -1;
+                updateCount();
+                return;
+              }
+              if (hits[activeIndex]) hits[activeIndex].classList.remove('is-active');
+              activeIndex = (index + hits.length) % hits.length;
+              hits[activeIndex].classList.add('is-active');
+              hits[activeIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+              updateCount();
+            };
+
+            const clearHighlights = () => {
+              content.innerHTML = originalHtml;
+              hits = [];
+              activeIndex = -1;
+              updateCount();
+            };
+
+            const highlight = () => {
+              const query = searchInput.value.trim();
+              clearHighlights();
+              if (!query) return;
+
+              const matcher = new RegExp(escapeRegExp(query), 'gi');
+              const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
+                acceptNode(node) {
+                  matcher.lastIndex = 0;
+                  return node.nodeValue.trim() && matcher.test(node.nodeValue)
+                    ? NodeFilter.FILTER_ACCEPT
+                    : NodeFilter.FILTER_REJECT;
+                }
+              });
+              const nodes = [];
+              while (walker.nextNode()) nodes.push(walker.currentNode);
+
+              nodes.forEach((node) => {
+                matcher.lastIndex = 0;
+                const fragment = document.createDocumentFragment();
+                let lastIndex = 0;
+                node.nodeValue.replace(matcher, (match, offset) => {
+                  fragment.append(document.createTextNode(node.nodeValue.slice(lastIndex, offset)));
+                  const mark = document.createElement('mark');
+                  mark.className = 'lector-hit';
+                  mark.textContent = match;
+                  fragment.append(mark);
+                  lastIndex = offset + match.length;
+                  return match;
+                });
+                fragment.append(document.createTextNode(node.nodeValue.slice(lastIndex)));
+                node.parentNode.replaceChild(fragment, node);
+              });
+
+              hits = Array.from(content.querySelectorAll('.lector-hit'));
+              setActive(0);
+            };
+
+            const openSearch = () => {
+              menu.classList.remove('is-open');
+              searchBar.classList.add('is-open');
+              window.setTimeout(() => searchInput.focus(), 0);
+              if (searchInput.value.trim()) highlight();
+            };
+
+            const closeSearch = () => {
+              searchBar.classList.remove('is-open');
+              searchInput.value = '';
+              clearHighlights();
+            };
+
+            const showMenu = (x, y) => {
+              if (!window.matchMedia('(max-width: 768px)').matches) return;
+              const margin = 10;
+              suppressClickUntil = Date.now() + 700;
+              menu.classList.add('is-open');
+              const rect = menu.getBoundingClientRect();
+              menu.style.left = Math.min(x, window.innerWidth - rect.width - margin) + 'px';
+              menu.style.top = Math.min(y, window.innerHeight - rect.height - margin) + 'px';
+            };
+
+            document.querySelectorAll('[data-open-search]').forEach((button) => {
+              button.addEventListener('click', openSearch);
+            });
+            document.querySelector('[data-reader-search-close]').addEventListener('click', closeSearch);
+            document.querySelector('[data-reader-search-prev]').addEventListener('click', () => setActive(activeIndex - 1));
+            document.querySelector('[data-reader-search-next]').addEventListener('click', () => setActive(activeIndex + 1));
+            searchInput.addEventListener('input', highlight);
+            searchInput.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                setActive(activeIndex + (event.shiftKey ? -1 : 1));
+              }
+              if (event.key === 'Escape') closeSearch();
+            });
+
+            content.addEventListener('touchstart', (event) => {
+              const touch = event.touches[0];
+              window.clearTimeout(pressTimer);
+              pressTimer = window.setTimeout(() => showMenu(touch.clientX, touch.clientY), 560);
+            }, { passive: true });
+            content.addEventListener('touchmove', () => window.clearTimeout(pressTimer), { passive: true });
+            content.addEventListener('touchend', () => window.clearTimeout(pressTimer), { passive: true });
+            content.addEventListener('contextmenu', (event) => {
+              if (!window.matchMedia('(max-width: 768px)').matches) return;
+              event.preventDefault();
+              showMenu(event.clientX, event.clientY);
+            });
+            document.addEventListener('click', (event) => {
+              if (menu.contains(event.target) || event.target.closest('[data-open-search]')) return;
+              if (Date.now() < suppressClickUntil) return;
+              menu.classList.remove('is-open');
+            });
+            window.addEventListener('scroll', () => menu.classList.remove('is-open'), { passive: true });
+          })();
+        </script>
 ${PWA_REGISTER_SCRIPT}
     </body>
       </html>

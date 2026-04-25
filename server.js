@@ -92,12 +92,41 @@ const PWA_NAV_STYLE = `
           color: #ffffff;
           font-weight: 600;
         }
+        .breadcrumbs {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          align-items: center;
+          margin: 0 0 14px;
+          color: #64748b;
+          font-size: 0.88rem;
+          line-height: 1.4;
+        }
+        .breadcrumbs a {
+          color: #475569;
+          text-decoration: none;
+        }
+        .breadcrumbs a:hover {
+          color: #0f172a;
+          text-decoration: underline;
+        }
+        .breadcrumbs span {
+          color: #94a3b8;
+        }
+        .breadcrumbs [aria-current="page"] {
+          color: #0f172a;
+          font-weight: 600;
+        }
         @media (max-width: 768px) {
           .top-nav-shell {
             display: none;
           }
           .top-nav-spacer {
             display: none;
+          }
+          .breadcrumbs {
+            margin-top: 2px;
+            font-size: 0.86rem;
           }
         }
       </style>
@@ -233,6 +262,37 @@ function getContextualBackLink(returnTo = "", fallbackHref = "/") {
     attrs:
       'onclick="event.preventDefault(); if (window.history.length > 1) { window.history.back(); } else { window.location.href = this.href; }"',
   };
+}
+
+function renderBreadcrumbs(items = []) {
+  const visibles = items.filter((item) => item && item.label);
+
+  if (!visibles.length) {
+    return "";
+  }
+
+  return `
+      <nav class="breadcrumbs" aria-label="Ruta de navegación">
+        ${visibles
+          .map((item, index) => {
+            const isLast = index === visibles.length - 1;
+            const label = escaparHtml(item.label);
+            const node = isLast || !item.href
+              ? `<span${isLast ? ' aria-current="page"' : ""}>${label}</span>`
+              : `<a href="${escaparHtml(item.href)}">${label}</a>`;
+            return `${index ? "<span>/</span>" : ""}${node}`;
+          })
+          .join("")}
+      </nav>
+    `;
+}
+
+function obtenerLabelOrigen(returnTo = "") {
+  if (!returnTo) {
+    return "";
+  }
+
+  return String(returnTo).startsWith("/resultados") ? "Resultados" : "Volver";
 }
 
 function decodeHtmlEntities(text = "") {
@@ -794,7 +854,15 @@ function renderIndiceTematicoHtml({
   textoHref = "",
   textoUrl = "",
   origenUrl = "",
+  returnTo = "",
 }) {
+  const origenLabel = obtenerLabelOrigen(returnTo);
+  const breadcrumbs = renderBreadcrumbs([
+    { href: "/", label: "Inicio" },
+    returnTo ? { href: returnTo, label: origenLabel } : null,
+    { href: fichaHref, label: "Ficha" },
+    { href: textoHref, label: "Texto" },
+  ]);
   const grupos = [];
 
   for (const item of indice.items) {
@@ -1039,6 +1107,7 @@ function renderIndiceTematicoHtml({
         { href: fichaHref, label: "Ficha" },
         { href: textoHref, label: "Texto", active: true },
       ])}
+      ${breadcrumbs}
       <section class="hero">
         <h1>${escaparHtml(indice.nombre)}</h1>
         <p>${escaparHtml(indice.titulo)}</p>
@@ -1423,6 +1492,12 @@ function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {}, returnTo =
   const fichaHref = buildLectorHref(urlOrigen, returnTo);
   const backLink = getContextualBackLink(returnTo, "/");
   const destinoLectura = obtenerDestinoLecturaPreferido(opciones, urlOrigen);
+  const origenLabel = obtenerLabelOrigen(returnTo);
+  const breadcrumbs = renderBreadcrumbs([
+    { href: "/", label: "Inicio" },
+    returnTo ? { href: returnTo, label: origenLabel } : null,
+    { href: fichaHref, label: "Ficha" },
+  ]);
   
   const botones = [
     esIndice
@@ -1585,6 +1660,7 @@ function renderFichaNormaHtml({ urlOrigen = "", norma, opciones = {}, returnTo =
         backLink,
         { href: fichaHref, label: 'Ficha', active: true },
       ])}
+      ${breadcrumbs}
       <div class="card">
         <h1>${escaparHtml(norma.titulo)}</h1>
         <div class="meta">
@@ -2626,6 +2702,23 @@ function renderBloquesNormativosHtml(bloques = [], objetivo = null) {
     })
     .join("");
 }
+
+function obtenerTituloResultados({ q = "", tipo = "", numero = "", anio = "" } = {}) {
+  if (tipo && numero) {
+    return `Resultados para ${[tipo, numero, anio].filter(Boolean).join(" ")}`;
+  }
+
+  if (q) {
+    return `Resultados para "${q}"`;
+  }
+
+  if (tipo || numero || anio) {
+    return "Resultados de búsqueda normativa";
+  }
+
+  return "Resultados";
+}
+
 function renderBuscadorHtml({
   q = "",
   tipo = "",
@@ -2639,6 +2732,7 @@ function renderBuscadorHtml({
   const resumenBusqueda = tipo && numero
     ? [tipo, numero, anio].filter(Boolean).join(" ")
     : q;
+  const tituloResultados = obtenerTituloResultados({ q, tipo, numero, anio });
   const items = resultados.length
     ? resultados
         .map(
@@ -2667,7 +2761,7 @@ function renderBuscadorHtml({
     <head>
       <meta charset="utf-8" />
       ${PWA_META}
-      <title>${mostrarFormulario ? "Buscador Normativo" : "Resultados de búsqueda"} | InfoLEG</title>
+      <title>${escaparHtml(mostrarFormulario ? "Buscador Normativo" : tituloResultados)} | InfoLEG</title>
       ${PWA_NAV_STYLE}
       <style>
         body {
@@ -2973,7 +3067,7 @@ function renderBuscadorHtml({
       </div>
       ` : `
       <div class="card page-hero">
-        <h1>Resultados de búsqueda</h1>
+        <h1>${escaparHtml(tituloResultados)}</h1>
         <p class="sub">${resumenBusqueda ? `Consulta: ${escaparHtml(resumenBusqueda)}` : "Realice una búsqueda desde la portada."}</p>
         <div class="acciones">
           <a class="boton-texto" href="/">Nueva búsqueda</a>
@@ -3299,6 +3393,13 @@ app.get("/ver-texto", async (req, res) => {
     const norma = extraerNorma(html);
     const indiceTematico = extraerIndiceTematico(html, url);
     const textoHref = buildVerTextoHref({ url, origen, modo, returnTo });
+    const origenLabel = obtenerLabelOrigen(returnTo);
+    const breadcrumbs = renderBreadcrumbs([
+      { href: "/", label: "Inicio" },
+      returnTo ? { href: returnTo, label: origenLabel } : null,
+      { href: fichaHref, label: "Ficha" },
+      { href: textoHref, label: "Texto" },
+    ]);
 
     if (indiceTematico && !tieneObjetivoIndice(objetivoIndice)) {
       return res.send(
@@ -3309,6 +3410,7 @@ app.get("/ver-texto", async (req, res) => {
           textoHref,
           textoUrl: url,
           origenUrl: origen || url,
+          returnTo,
         })
       );
     }
@@ -3633,6 +3735,7 @@ app.get("/ver-texto", async (req, res) => {
           { href: fichaHref, label: 'Ficha' },
           { href: textoHref, label: 'Texto', active: true },
         ])}
+        ${breadcrumbs}
         <h1 class="titulo">${escaparHtml(norma.titulo)}</h1>
         <div class="lector-actions" aria-label="Herramientas del lector">
           <button class="lector-icon-button" type="button" data-open-search aria-label="Buscar en el texto" title="Buscar en el texto">
